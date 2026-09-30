@@ -183,11 +183,18 @@ footer { margin-top: 40px; font-size: 12px; color: var(--muted); text-align:cent
 #lock[hidden] { display:none; }
 #lock form { width: 100%; max-width: 340px; padding: 24px; display:flex; flex-direction:column; gap: 12px; }
 #lock p { margin: 0; font-size: 13.5px; }
-#lock input[type=password] {
-  font: inherit; padding: 8px 12px; border-radius: 8px;
+#lock .small { font-size: 12px; }
+#lock .pw { position: relative; display: flex; }
+#lock .pw input {
+  flex: 1; min-width: 0; font: inherit; padding: 8px 64px 8px 12px; border-radius: 8px;
   border: 1px solid var(--axis); background: var(--page); color: var(--ink);
 }
-#lock input[type=password]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+#lock .pw input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+#lock .pw button {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  border: none; background: transparent; color: var(--ink-2); font-size: 13px; padding: 4px 10px; border-radius: 6px;
+}
+#lock .pw button:hover { background: color-mix(in srgb, var(--ink) 6%, transparent); }
 #lock button[type=submit] { background: var(--ink); color: var(--surface); border-color: var(--ink); border-radius: 8px; padding: 8px 12px; }
 #lock button[disabled] { opacity: .6; cursor: progress; }
 .err { color: var(--critical); }
@@ -204,12 +211,17 @@ footer { margin-top: 40px; font-size: 12px; color: var(--muted); text-align:cent
 <div id="lock" hidden>
   <form class="card" id="lock-form" autocomplete="on">
     <h1>訓練日誌</h1>
-    <p class="muted">這個頁面有加密，輸入密碼才看得到。</p>
+    <p class="muted" id="lock-note">這個頁面有加密，輸入密碼才看得到。</p>
     <input type="text" name="username" value="training-log" autocomplete="username" hidden>
-    <input type="password" id="pw" name="password" autocomplete="current-password" aria-label="密碼" required>
-    <label class="check"><input type="checkbox" id="remember" checked> 在這台裝置記住</label>
+    <div class="pw">
+      <input type="password" id="pw" name="password" autocomplete="current-password" aria-label="密碼"
+             autocapitalize="off" autocorrect="off" spellcheck="false" required>
+      <button type="button" id="pw-toggle" aria-pressed="false" aria-label="顯示密碼">顯示</button>
+    </div>
+    <label class="check"><input type="checkbox" id="remember" checked> 記住這台裝置（3 天沒開會再問）</label>
     <button type="submit" id="unlock">解鎖</button>
     <p class="err" id="lock-err" role="alert" hidden>密碼不對，再試一次</p>
+    <p class="muted small">網頁版本：<span id="lock-gen">__GENERATED_AT__</span></p>
   </form>
 </div>
 
@@ -239,7 +251,7 @@ footer { margin-top: 40px; font-size: 12px; color: var(--muted); text-align:cent
   <div class="filters" id="filters"></div>
   <div class="days" id="days"></div>
 
-  <footer>產生於 __GENERATED_AT__ · 資料來源 Intervals.icu · 課表 plan.json</footer>
+  <footer>產生於 <span id="gen-at">__GENERATED_AT__</span> · 資料來源 Intervals.icu · 課表 plan.json</footer>
 </main>
 
 <script id="digest-data" type="application/json">/*__DIGEST_JSON__*/</script>
@@ -251,8 +263,16 @@ footer { margin-top: 40px; font-size: 12px; color: var(--muted); text-align:cent
   // app 程式碼在這段後面；記住金鑰那條路解密很快，要等整份文件讀完再啟動
   if (document.readyState === "loading") await new Promise((r) => document.addEventListener("DOMContentLoaded", r, { once: true }));
   try { const t = localStorage.getItem("theme"); if (t && t !== "auto") document.documentElement.setAttribute("data-theme", t); } catch (_) {}
-  const raw = JSON.parse(document.getElementById("digest-data").textContent);
+  let raw = JSON.parse(document.getElementById("digest-data").textContent);
   const KEY = "digest-key";
+  const REMEMBER_DAYS = 3;          // 超過這麼多天沒打開，就要重新輸入密碼（每次打開重新起算）
+  const DAY = 86400000;
+  // 記住的是 {k: 金鑰, t: 最後一次打開的時間}，不是密碼本身
+  const store = {
+    get() { try { const v = JSON.parse(localStorage.getItem(KEY)); return v && v.k && v.t ? v : null; } catch (_) { return null; } },
+    set(k) { try { localStorage.setItem(KEY, JSON.stringify({ k, t: Date.now() })); } catch (_) {} },
+    clear() { try { localStorage.removeItem(KEY); } catch (_) {} },
+  };
   const boot = (data) => {
     window.__DIGEST__ = data;
     document.getElementById("lock").hidden = true;
@@ -260,7 +280,7 @@ footer { margin-top: 40px; font-size: 12px; color: var(--muted); text-align:cent
     const lockBtn = document.getElementById("lock-btn");
     if (raw.enc) {
       lockBtn.hidden = false;
-      lockBtn.addEventListener("click", () => { try { localStorage.removeItem(KEY); } catch (_) {} location.reload(); });
+      lockBtn.addEventListener("click", () => { store.clear(); location.reload(); });
     }
     const s = document.createElement("script");
     s.textContent = document.getElementById("app").textContent;
@@ -269,6 +289,7 @@ footer { margin-top: 40px; font-size: 12px; color: var(--muted); text-align:cent
   if (!raw.enc) return boot(raw);
 
   const bytes = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  const toB64 = (u8) => btoa(String.fromCharCode(...u8));
   const open = async (key) => JSON.parse(new TextDecoder().decode(
     await crypto.subtle.decrypt({ name: "AES-GCM", iv: bytes(raw.iv) }, key, bytes(raw.data))));
   const derive = async (pw) => {
@@ -277,35 +298,68 @@ footer { margin-top: 40px; font-size: 12px; color: var(--muted); text-align:cent
       base, { name: "AES-GCM", length: 256 }, true, ["decrypt"]);
   };
 
-  let remembered = null;
-  try {
-    const saved = localStorage.getItem(KEY);
-    if (saved) {
-      const key = await crypto.subtle.importKey("raw", bytes(saved), "AES-GCM", false, ["decrypt"]);
-      remembered = await open(key);
+  // 網頁剛重新產生（例如剛換密碼）時，瀏覽器可能還拿著快取的舊版（GitHub Pages 最多快取 10 分鐘）。
+  // 解不開的時候，先到伺服器抓一次最新版；是新版就換上去再試一次。
+  let refreshed = false;
+  const refresh = async () => {
+    if (refreshed || location.protocol === "file:") return false;
+    refreshed = true;
+    try {
+      const html = await (await fetch(location.pathname + "?v=" + Date.now(), { cache: "no-store" })).text();
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      const env = JSON.parse(doc.getElementById("digest-data").textContent);
+      if (!env.enc || env.iv === raw.iv) return false;
+      raw = env;
+      const stamp = doc.getElementById("gen-at") && doc.getElementById("gen-at").textContent;
+      if (stamp) for (const id of ["gen-at", "lock-gen"]) document.getElementById(id).textContent = stamp;
+      return true;
+    } catch (_) { return false; }
+  };
+  const tryKey = async (getKey) => {
+    try { return await open(await getKey()); } catch (_) {}
+    if (await refresh()) { try { return await open(await getKey()); } catch (_) {} }
+    return null;
+  };
+
+  const note = document.getElementById("lock-note");
+  const saved = store.get();
+  if (saved) {
+    if (Date.now() - saved.t > REMEMBER_DAYS * DAY) {
+      store.clear();
+      note.textContent = `超過 ${REMEMBER_DAYS} 天沒打開，請重新輸入密碼。`;
+    } else {
+      const data = await tryKey(() => crypto.subtle.importKey("raw", bytes(saved.k), "AES-GCM", false, ["decrypt"]));
+      if (data) { store.set(saved.k); return boot(data); }      // 每次打開，3 天重新起算
+      store.clear();                                              // 解不開 = 換過密碼
+      note.textContent = "密碼已經換過了，請輸入新密碼。";
     }
-  } catch (_) { try { localStorage.removeItem(KEY); } catch (_) {} }   // 只有解不開（換過密碼）才丟掉記住的金鑰
-  if (remembered) return boot(remembered);
+  }
 
   const lock = document.getElementById("lock"), form = document.getElementById("lock-form");
   const pw = document.getElementById("pw"), btn = document.getElementById("unlock");
   const err = document.getElementById("lock-err"), remember = document.getElementById("remember");
+  const eye = document.getElementById("pw-toggle");
+  eye.addEventListener("click", () => {
+    const show = pw.type === "password";
+    pw.type = show ? "text" : "password";
+    eye.textContent = show ? "隱藏" : "顯示";
+    eye.setAttribute("aria-pressed", String(show));
+    eye.setAttribute("aria-label", show ? "隱藏密碼" : "顯示密碼");
+    pw.focus();
+  });
   lock.hidden = false;
   pw.focus();
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     btn.disabled = true; btn.textContent = "解鎖中…"; err.hidden = true;
-    try {
-      const key = await derive(pw.value);
-      const data = await open(key);
-      if (remember.checked) {
-        const rawKey = new Uint8Array(await crypto.subtle.exportKey("raw", key));
-        try { localStorage.setItem(KEY, btoa(String.fromCharCode(...rawKey))); } catch (_) {}
-      }
-      boot(data);
-    } catch (_) {
-      err.hidden = false; btn.disabled = false; btn.textContent = "解鎖"; pw.select();
+    let key = null;
+    const data = await tryKey(async () => (key = await derive(pw.value)));
+    if (data) {
+      if (remember.checked) store.set(toB64(new Uint8Array(await crypto.subtle.exportKey("raw", key))));
+      else store.clear();
+      return boot(data);
     }
+    err.hidden = false; btn.disabled = false; btn.textContent = "解鎖"; pw.select();
   });
 })();
 </script>

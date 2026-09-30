@@ -106,7 +106,17 @@ def mean(values):
 
 
 def load_plan(path="plan.json") -> dict:
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+    text = Path(path).read_text(encoding="utf-8-sig")
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        # plan.json 是手動編輯的，最常見的錯是少逗號或多逗號，直接指出第幾行
+        line = text.splitlines()[exc.lineno - 1] if exc.lineno <= len(text.splitlines()) else ""
+        raise SystemExit(
+            f"錯誤：{path} 第 {exc.lineno} 行格式不對（{exc.msg}）\n"
+            f"    {line.strip()}\n"
+            f"常見原因：上一行結尾少了逗號、最後一筆後面多了逗號、引號沒成對。"
+        ) from None
 
 
 # ---------- 配速分帶 ----------
