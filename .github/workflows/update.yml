@@ -1,0 +1,77 @@
+# 每天早上抓一次 Intervals.icu，產生「加密過的」網頁，直接部署到 GitHub Pages。
+#
+# 網頁不 commit 進 repo（docs/ 在 .gitignore 裡），只存在 Pages 上，而且是加密的——
+# 公開 repo 裡看不到任何訓練或健康資料。
+#
+# 需要三個 repo secrets（Settings → Secrets and variables → Actions）：
+#   ICU_ATHLETE_ID、ICU_API_KEY、DIGEST_PASSWORD（網頁密碼）
+# 最快的設法：在這個資料夾打 `gh secret set -f .env`
+
+name: update digest
+
+on:
+  schedule:
+    - cron: "30 22 * * *"      # UTC 22:30 = 台北 06:30，晨間 HRV 通常已同步
+  workflow_dispatch:           # Actions 頁面可以手動按
+  push:
+    branches: [master]
+    paths-ignore: ["**.md"]    # 改程式或 plan.json 就立刻重新發佈
+
+permissions:
+  contents: write              # 只用在下面的 keepalive 空 commit
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install requests cryptography
+
+      - name: 產生加密網頁
+        env:
+          ICU_ATHLETE_ID: ${{ secrets.ICU_ATHLETE_ID }}
+          ICU_API_KEY: ${{ secrets.ICU_API_KEY }}
+          DIGEST_PASSWORD: ${{ secrets.DIGEST_PASSWORD }}
+        # --encrypt：沒有密碼就直接失敗，絕不發佈明文
+        run: python digest.py --weeks 8 --format html --encrypt --out site/index.html
+
+      - name: 再確認一次是加密的
+        run: grep -q '"enc":"aes-256-gcm"' site/index.html
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      # 公開 repo 60 天沒有任何 commit，GitHub 會自動停用排程。
+      # 網頁不 commit，所以每 50 天補一個空 commit 讓排程一直活著。
+      - name: 保持排程不被停用
+        if: github.event_name == 'schedule'
+        run: |
+          last=$(git log -1 --format=%ct)
+          if [ $(( $(date +%s) - last )) -gt $(( 50 * 86400 )) ]; then
+            git config user.name "digest-bot"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit --allow-empty -m "keepalive: 維持每日排程"
+            git push
+          fi
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

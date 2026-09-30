@@ -1,0 +1,14 @@
+.env
+.env.*
+!.env.example
+.cache/
+__pycache__/
+*.pyc
+digest.txt
+
+# 產生出來的網頁：本機產的可能是明文，絕不進 repo。
+# 上線版由 GitHub Actions 產生、加密後直接部署到 Pages。
+docs/
+site/
+# 原始 API 回應，含地點與健康資料
+sample/

@@ -1,0 +1,145 @@
+{
+  "meta": {
+    "version": 1,
+    "updated": "2026-08-26",
+    "timezone": "Asia/Taipei",
+    "note": "半馬訓練週期設定檔。配速依丹尼爾 VDOT 系統，於 W4 10K 測驗後更新 vdot 與 paces 兩區塊。"
+  },
+
+  "athlete": {
+    "hr_max": 194,
+    "hr_rest": 43,
+    "lthr": 174,
+    "hrv_baseline": [61, 70],
+    "notes": [
+      "左阿基里斯腱舊傷（2024 上半年），R 配速與下坡為高風險",
+      "可訓練日 4-5 天，偏好二三五 + 週末擇一",
+      "質量課固定排週二與週五"
+    ]
+  },
+
+  "races": [
+    {
+      "id": "eva",
+      "name": "長榮航空馬拉松 半程",
+      "date": "2026-10-25",
+      "role": "測驗賽",
+      "goal_min": 94.5,
+      "goal_pace": "4:29",
+      "taper_days": 6,
+      "note": "平路，用來校正 VDOT 與練配速執行。全力跑，但不做完整減量。"
+    },
+    {
+      "id": "yangmingshan",
+      "name": "陽明山半程馬拉松",
+      "date": "2026-11-01",
+      "role": "體驗跑",
+      "goal_min": null,
+      "note": "山路賽事，下坡離心負荷高。以 E 配速跑完，不計時，避免侵蝕 11 月專項區塊。"
+    },
+    {
+      "id": "taipei",
+      "name": "台北馬拉松 半程",
+      "date": "2026-12-20",
+      "role": "A 級目標賽",
+      "goal_min": 92,
+      "goal_pace": "4:22",
+      "stretch_min": 90,
+      "stretch_pace": "4:16",
+      "taper_days": 14,
+      "note": "主目標。氣溫約 15-18C，平坦快速賽道，有配速列車。"
+    }
+  ],
+
+  "vdot": {
+    "current": 47,
+    "basis": "2026-09-08 10K 測驗 44:35 @4:27，均心 169、平台 172（LTHR 174），末段仍有餘力加速至 4:24 — 判定為閾值強度而非全力",
+    "required": { "92min": 48, "90min": 49 },
+    "recalibrate_on": "2026-10-25"
+  },
+
+  "paces": {
+    "E": { "min": "5:50", "max": "6:25", "hr": [126, 153] },
+    "M": { "target": "4:42", "hr": [160, 166] },
+    "T": { "target": "4:24", "hr": [170, 176] },
+    "I": { "target": "4:03", "hr": null },
+    "R": { "target": "3:46", "hr": null },
+    "race": { "target": "4:22", "hr": [172, 178] }
+  },
+
+  "rules": {
+    "quality_caps": {
+      "T_pct_of_week": 10,
+      "I_pct_of_week": 8,
+      "R_pct_of_week": 5,
+      "M_pct_of_week": 20,
+      "M_max_minutes": 110,
+      "note": "丹尼爾的量的上限，超過即標記警示"
+    },
+    "long_run": {
+      "max_pct_of_week": 30,
+      "max_minutes_half_marathon": 110,
+      "note": "半馬長跑上限約為比賽時長的 1.0-1.2 倍。超過 110 分對半馬邊際效益極低。"
+    },
+    "volume_ramp": {
+      "weekly_increase_pct_normal": 10,
+      "weekly_increase_pct_max": 15,
+      "note": "連續三週增量後應安排減量週"
+    },
+    "interval_design": {
+      "I_rep_min_seconds": 180,
+      "I_rep_max_seconds": 300,
+      "note": "VO2 動力學需 90-120 秒爬升，單趟短於 3 分鐘無法累積有效 VO2max 時間。600m 對此跑者過短。"
+    },
+    "hrv_decision": [
+      { "when": "單日低於基線，前一天有質量課", "action": "正常，照計畫走", "level": "ok" },
+      { "when": "連續 2-3 天明顯低於基線", "action": "質量課降級為 E，或後推一天", "level": "warn" },
+      { "when": "7 日平均連續 5-7 天低於基線下緣", "action": "減量 20-30%，或提前恢復週", "level": "alert" },
+      { "when": "HRV 低且靜止心率升高 5 bpm 以上", "action": "最強警訊組合，休息", "level": "alert" },
+      { "when": "HRV 低且有喉嚨痛或體溫異常", "action": "停練", "level": "alert" }
+    ],
+    "execution_flags": [
+      "T 課配速快於處方 5 秒以上 → 標記，T 跑太快會變成半吊子的 I 課",
+      "T 課兩趟趟末心率差異大於 5 bpm → 標記配速不均",
+      "I 課趟末心率未達 185 → 標記刺激不足，檢討單趟長度或配速",
+      "R 課配速快於 3:45 → 標記，阿基里斯腱風險",
+      "E 課平均心率高於 153 → 標記，恢復日跑太快"
+    ]
+  },
+
+  "weeks": [
+    { "n": 1,  "start": "2026-08-10", "target_km": 40, "phase": "基礎", "long_run_min": 80,  "note": "建立長跑習慣" },
+    { "n": 2,  "start": "2026-08-17", "target_km": 42, "phase": "基礎", "long_run_min": 90,  "note": "首次 2x2000m 節奏" },
+    { "n": 3,  "start": "2026-08-24", "target_km": 44, "phase": "基礎", "long_run_min": 90,  "note": "連續節奏跑；長跑首次加 M 配速尾段" },
+    { "n": 4,  "start": "2026-08-31", "target_km": 34, "phase": "減量", "long_run_min": 70,  "note": "10K 全力測驗，定案後續所有配速", "key": "測驗" },
+    { "n": 5,  "start": "2026-09-07", "target_km": 47, "phase": "閾值", "long_run_min": 90,  "note": "依測驗結果更新配速後重新增量" },
+    { "n": 6,  "start": "2026-09-14", "target_km": 50, "phase": "閾值", "long_run_min": 95 },
+    { "n": 7,  "start": "2026-09-21", "target_km": 52, "phase": "閾值", "long_run_min": 100, "note": "長跑首次到 100 分" },
+    { "n": 8,  "start": "2026-09-28", "target_km": 40, "phase": "減量", "long_run_min": 80 },
+    { "n": 9,  "start": "2026-10-05", "target_km": 50, "phase": "銳化", "long_run_min": 100, "note": "長跑尾段加入比賽配速" },
+    { "n": 10, "start": "2026-10-12", "target_km": 48, "phase": "銳化", "long_run_min": 95 },
+    { "n": 11, "start": "2026-10-19", "target_km": 35, "phase": "小減量", "long_run_min": 0,  "note": "長榮馬 10/25，目標 94-95 分", "key": "長榮馬" },
+    { "n": 12, "start": "2026-10-26", "target_km": 35, "phase": "恢復", "long_run_min": 0,   "note": "陽明山 11/1 以 E 配速體驗跑，賽後 3-4 天恢復", "key": "陽明山" },
+    { "n": 13, "start": "2026-11-02", "target_km": 45, "phase": "重建", "long_run_min": 90 },
+    { "n": 14, "start": "2026-11-09", "target_km": 52, "phase": "專項高峰", "long_run_min": 100 },
+    { "n": 15, "start": "2026-11-16", "target_km": 55, "phase": "專項高峰", "long_run_min": 105 },
+    { "n": 16, "start": "2026-11-23", "target_km": 58, "phase": "專項高峰", "long_run_min": 110, "note": "全期最大週跑量。阿基里斯腱風險最高的四週，離心提踵不可中斷。" },
+    { "n": 17, "start": "2026-11-30", "target_km": 55, "phase": "專項高峰", "long_run_min": 100 },
+    { "n": 18, "start": "2026-12-07", "target_km": 40, "phase": "減量", "long_run_min": 80 },
+    { "n": 19, "start": "2026-12-14", "target_km": 25, "phase": "減量", "long_run_min": 40, "note": "台北馬 12/20，目標 92 分", "key": "台北馬" }
+  ],
+
+  "sessions": {
+    "2026-08-26": { "type": "E",  "desc": "E 45 分 @6:00-6:30，心率 135-148", "km": 7.5 },
+    "2026-08-27": { "type": "OFF","desc": "休息" },
+    "2026-08-28": { "type": "I",  "desc": "熱身 3km + 4x1000m @4:05（慢跑 3 分）+ 4x150m @3:45-3:50（走 90 秒）+ 緩和 1.5km", "km": 10.5 },
+    "2026-08-29": { "type": "E",  "desc": "休息，或 E 4km", "km": 4 },
+    "2026-08-30": { "type": "L",  "desc": "長跑 90 分 @5:55-6:25，最後 3km 拉到 M 配速 4:40", "km": 14.5 },
+
+    "2026-09-01": { "type": "T",  "desc": "熱身 3km + 2x10 分節奏 @4:27（慢跑 3 分）+ 緩和 2km", "km": 9 },
+    "2026-09-02": { "type": "E",  "desc": "E 40 分", "km": 6.5 },
+    "2026-09-04": { "type": "E",  "desc": "E 30 分 + 4x150m R", "km": 5.5 },
+    "2026-09-08": { "type": "TEST","desc": "10K 全力測驗。熱身 2.5km + 10K + 緩和 1.5km", "km": 14 },
+    "2026-09-06": { "type": "L",  "desc": "長跑 70 分，純 E", "km": 11 }
+  }
+}

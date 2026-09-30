@@ -1,0 +1,742 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>訓練日誌</title>
+<style>
+/* ---------- 色彩：dataviz 參考調色盤，光暗兩組都跑過驗證 ---------- */
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;  --surface: #fcfcfb;
+  --ink: #0b0b0b;   --ink-2: #52514e;  --muted: #898781;
+  --grid: #e1e0d9;  --axis: #c3c2b7;   --border: rgba(11,11,11,.10);
+  --c1:#2a78d6; --c2:#eb6834; --c3:#1baf7a; --c4:#eda100; --c5:#e87ba4; --c6:#008300;
+  --c0:#a8a69f;                                   /* 交叉訓練 / 未分類：中性 */
+  --accent: var(--c1); --accent-soft: #cde2fb;
+  --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --critical:#d03b3b;
+  --wash: rgba(42,120,214,.10);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0d0d0d;  --surface: #1a1a19;
+    --ink: #ffffff;   --ink-2: #c3c2b7;  --muted: #898781;
+    --grid: #2c2c2a;  --axis: #383835;   --border: rgba(255,255,255,.10);
+    --c1:#3987e5; --c2:#d95926; --c3:#199e70; --c4:#c98500; --c5:#d55181; --c6:#008300;
+    --c0:#6b6a64;
+    --accent-soft: #184f95;
+    --wash: rgba(57,135,229,.14);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d;  --surface: #1a1a19;
+  --ink: #ffffff;   --ink-2: #c3c2b7;  --muted: #898781;
+  --grid: #2c2c2a;  --axis: #383835;   --border: rgba(255,255,255,.10);
+  --c1:#3987e5; --c2:#d95926; --c3:#199e70; --c4:#c98500; --c5:#d55181; --c6:#008300;
+  --c0:#6b6a64;
+  --accent-soft: #184f95;
+  --wash: rgba(57,135,229,.14);
+}
+
+/* ---------- 基底 ---------- */
+* { box-sizing: border-box; }
+html { background: var(--page); }
+body {
+  margin: 0; color: var(--ink); background: var(--page);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", "Noto Sans TC", "PingFang TC", sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+main { max-width: 1040px; margin: 0 auto; padding: 16px 16px 64px; }
+h1 { font-size: 22px; margin: 0; font-weight: 650; letter-spacing: -.01em; }
+h2 { font-size: 16px; margin: 32px 0 12px; font-weight: 650; color: var(--ink);
+     display:flex; align-items:baseline; gap:12px; }
+h2 small { font-weight: 400; color: var(--muted); font-size: 13px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
+.muted { color: var(--muted); }
+.ink2 { color: var(--ink-2); }
+.num { font-variant-numeric: tabular-nums; }
+button, .chip {
+  font: inherit; color: var(--ink); background: var(--surface);
+  border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px; cursor: pointer;
+}
+button:hover { border-color: var(--axis); }
+button[aria-pressed="true"], .chip[aria-pressed="true"] {
+  background: var(--ink); color: var(--surface); border-color: var(--ink);
+}
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+label.check { display:inline-flex; align-items:center; gap:6px; cursor:pointer; user-select:none; }
+label.check input { accent-color: var(--accent); width:16px; height:16px; margin:0; }
+
+/* ---------- 檔頭 ---------- */
+.top { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; }
+.top .range { color: var(--muted); font-size: 13px; margin-top: 2px; }
+.hero { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 16px; }
+.tile { padding: 14px 16px; }
+.tile .label { font-size: 12.5px; color: var(--muted); }
+.tile .value { font-size: 26px; font-weight: 600; margin-top: 2px; line-height: 1.2; }
+.tile .value small { font-size: 14px; font-weight: 400; color: var(--ink-2); margin-left: 4px; }
+.tile .sub { font-size: 13px; color: var(--ink-2); margin-top: 4px; }
+.meter { height: 6px; border-radius: 3px; background: var(--accent-soft); margin-top: 10px; overflow: hidden; }
+.meter > i { display:block; height:100%; background: var(--accent); border-radius: 3px; }
+.paces { margin-top: 12px; font-size: 13.5px; color: var(--ink-2); display:flex; flex-wrap:wrap; gap: 4px 14px; }
+.paces b { color: var(--ink); font-weight: 600; margin-right: 3px; }
+
+/* ---------- 週統計 ---------- */
+.legend { display:flex; flex-wrap:wrap; gap: 4px 14px; font-size: 12.5px; color: var(--ink-2); margin: 0 0 8px; }
+.legend i, .key { display:inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.key.line { width: 14px; height: 2px; border-radius: 1px; vertical-align: 3px; }
+.tablewrap { overflow-x: auto; }
+table.weeks { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.weeks th, table.weeks td { padding: 9px 10px; text-align: left; vertical-align: top; white-space: nowrap; }
+table.weeks th { font-weight: 500; color: var(--muted); font-size: 12.5px; border-bottom: 1px solid var(--grid); }
+table.weeks tbody tr { border-bottom: 1px solid var(--grid); cursor: pointer; }
+table.weeks tbody tr:hover { background: color-mix(in srgb, var(--ink) 4%, transparent); }
+table.weeks tbody tr[aria-selected="true"] td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+table.weeks td.strip { min-width: 180px; }
+.strip .bar { display:flex; height: 10px; border-radius: 3px; overflow: hidden; gap: 2px; background: transparent; }
+.strip .bar > i { display:block; height: 100%; }
+.strip .bar > i:first-child { border-radius: 3px 0 0 3px; }
+.strip .bar > i:last-child { border-radius: 0 3px 3px 0; }
+.strip .txt { font-size: 12px; color: var(--muted); margin-top: 3px; white-space: normal; }
+td.notes { white-space: normal; min-width: 220px; font-size: 13px; color: var(--ink-2); }
+.flag { display:flex; gap: 6px; align-items: flex-start; }
+.flag .ico { flex: none; width: 16px; text-align:center; }
+.flag.serious .ico { color: var(--serious); }
+.flag.critical .ico { color: var(--critical); }
+.flag.info .ico { color: var(--muted); }
+.flag.good .ico { color: var(--good); }
+
+/* ---------- 圖表 ---------- */
+.charts { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 700px) { .charts { grid-template-columns: 1fr; } }
+.chart { padding: 12px 14px 10px; }
+.chart .head { display:flex; justify-content:space-between; align-items:baseline; gap: 8px; }
+.chart .title { font-weight: 600; font-size: 14px; }
+.chart .title small { color: var(--muted); font-weight: 400; margin-left: 6px; }
+.chart .tbl-btn { font-size: 12px; padding: 2px 9px; }
+.chart .plot { position: relative; margin-top: 6px; outline: none; }
+.chart svg { display:block; width: 100%; height: auto; overflow: visible; }
+.chart .axis text { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.chart .grid line { stroke: var(--grid); stroke-width: 1; }
+.chart .base line { stroke: var(--axis); stroke-width: 1; }
+.chart .cross { stroke: var(--axis); stroke-width: 1; pointer-events: none; }
+.tip {
+  position: absolute; pointer-events: none; z-index: 2;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px 10px; font-size: 12.5px; box-shadow: 0 4px 16px rgba(0,0,0,.12);
+  min-width: 120px; white-space: nowrap;
+}
+.tip .d { color: var(--muted); font-size: 11.5px; margin-bottom: 2px; }
+.tip .r { display:flex; align-items:center; gap: 8px; }
+.tip .r b { font-weight: 600; min-width: 3.5em; }
+.tip .r span { color: var(--ink-2); }
+.tip .k { width: 12px; height: 2px; border-radius: 1px; }
+table.data { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 6px; }
+table.data th, table.data td { padding: 4px 8px; text-align: right; border-bottom: 1px solid var(--grid); font-variant-numeric: tabular-nums; }
+table.data th:first-child, table.data td:first-child { text-align: left; }
+table.data th { color: var(--muted); font-weight: 500; }
+.chart[data-view="table"] .plot { display:none; }
+.chart:not([data-view="table"]) .datatable { display:none; }
+.datatable { max-height: 260px; overflow: auto; }
+
+/* ---------- 篩選列 ---------- */
+.filters { display:flex; flex-wrap:wrap; gap: 8px 12px; align-items:center; margin: 0 0 12px;
+           position: sticky; top: 0; background: var(--page); padding: 10px 0; z-index: 3; }
+.filters .grp { display:flex; gap: 6px; flex-wrap:wrap; align-items:center; }
+.filters .sep { width:1px; height: 20px; background: var(--grid); }
+
+/* ---------- 每日 ---------- */
+.days { display:flex; flex-direction:column; gap: 10px; }
+.day { padding: 12px 14px; }
+.day.rest { padding: 8px 14px; display:flex; gap: 12px; flex-wrap: wrap; align-items:baseline; color: var(--ink-2); font-size: 13.5px; }
+.day .date { font-weight: 600; font-variant-numeric: tabular-nums; }
+.day .date small { color: var(--muted); font-weight: 400; margin-left: 4px; }
+.act { display:grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items:baseline; margin-top: 8px; }
+.act:first-of-type { margin-top: 6px; }
+.badge { display:inline-flex; align-items:center; gap: 6px; font-weight: 600; font-size: 13px; white-space: nowrap; }
+.badge i { width: 10px; height: 10px; border-radius: 3px; display:inline-block; }
+.badge .cls { color: var(--muted); font-weight: 500; font-size: 12px; }
+.act .stats { color: var(--ink-2); font-size: 13.5px; }
+.act .stats b { color: var(--ink); font-weight: 600; }
+.act details { grid-column: 2; font-size: 13px; }
+.act summary { cursor: pointer; color: var(--muted); font-size: 12.5px; list-style: none; user-select:none; }
+.act summary::-webkit-details-marker { display:none; }
+.act summary::before { content: "▸ "; }
+.act details[open] summary::before { content: "▾ "; }
+table.laps { border-collapse: collapse; margin-top: 4px; font-variant-numeric: tabular-nums; }
+table.laps td { padding: 1px 12px 1px 0; color: var(--ink-2); white-space: nowrap; }
+table.laps td:first-child { color: var(--muted); }
+.row { display:grid; grid-template-columns: 3.2em 1fr; gap: 8px; font-size: 13.5px; margin-top: 6px; color: var(--ink-2); }
+.row .k { color: var(--muted); }
+.row .v b { color: var(--ink); font-weight: 600; }
+.row.devi .v { color: var(--ink); }
+.row .desc { color: var(--muted); font-size: 12.5px; }
+.flags { margin-top: 8px; display:flex; flex-direction:column; gap: 4px; font-size: 13.5px; }
+.empty { padding: 24px; text-align:center; color: var(--muted); }
+footer { margin-top: 40px; font-size: 12px; color: var(--muted); text-align:center; }
+
+/* ---------- 密碼鎖 ---------- */
+#lock { min-height: 100vh; display:flex; align-items:center; justify-content:center; padding: 16px; }
+#lock[hidden] { display:none; }
+#lock form { width: 100%; max-width: 340px; padding: 24px; display:flex; flex-direction:column; gap: 12px; }
+#lock p { margin: 0; font-size: 13.5px; }
+#lock input[type=password] {
+  font: inherit; padding: 8px 12px; border-radius: 8px;
+  border: 1px solid var(--axis); background: var(--page); color: var(--ink);
+}
+#lock input[type=password]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+#lock button[type=submit] { background: var(--ink); color: var(--surface); border-color: var(--ink); border-radius: 8px; padding: 8px 12px; }
+#lock button[disabled] { opacity: .6; cursor: progress; }
+.err { color: var(--critical); }
+.top .actions { display:flex; gap: 8px; }
+@media (max-width: 560px) {
+  main { padding: 12px 12px 48px; }
+  .act { grid-template-columns: 1fr; }
+  .act details { grid-column: 1; }
+  .row { grid-template-columns: 3em 1fr; }
+}
+</style>
+</head>
+<body>
+<div id="lock" hidden>
+  <form class="card" id="lock-form" autocomplete="on">
+    <h1>訓練日誌</h1>
+    <p class="muted">這個頁面有加密，輸入密碼才看得到。</p>
+    <input type="text" name="username" value="training-log" autocomplete="username" hidden>
+    <input type="password" id="pw" name="password" autocomplete="current-password" aria-label="密碼" required>
+    <label class="check"><input type="checkbox" id="remember" checked> 在這台裝置記住</label>
+    <button type="submit" id="unlock">解鎖</button>
+    <p class="err" id="lock-err" role="alert" hidden>密碼不對，再試一次</p>
+  </form>
+</div>
+
+<main id="app-root" hidden>
+  <div class="top">
+    <div>
+      <h1>訓練日誌</h1>
+      <div class="range" id="range"></div>
+    </div>
+    <div class="actions">
+      <button id="lock-btn" type="button" title="忘記這台裝置記住的密碼" hidden>鎖定</button>
+      <button id="theme" type="button" title="切換深淺色">◐ 自動</button>
+    </div>
+  </div>
+
+  <div class="hero" id="hero"></div>
+  <div class="paces" id="paces"></div>
+
+  <h2>週統計 <small>點一列可篩選下面的每日明細</small></h2>
+  <div class="legend" id="class-legend"></div>
+  <div class="card tablewrap"><table class="weeks" id="weeks"></table></div>
+
+  <h2>趨勢</h2>
+  <div class="charts" id="charts"></div>
+
+  <h2 id="daily">每日明細</h2>
+  <div class="filters" id="filters"></div>
+  <div class="days" id="days"></div>
+
+  <footer>產生於 __GENERATED_AT__ · 資料來源 Intervals.icu · 課表 plan.json</footer>
+</main>
+
+<script id="digest-data" type="application/json">/*__DIGEST_JSON__*/</script>
+<script>
+// ---------- 密碼閘門 ----------
+// 資料可能是明文，也可能是 AES-256-GCM 加密的信封 {enc, kdf, iter, salt, iv, data}。
+// 解開之後才執行下面那段 app 程式。「記住」存的是衍生出來的金鑰，不是密碼本身。
+(async function gate() {
+  // app 程式碼在這段後面；記住金鑰那條路解密很快，要等整份文件讀完再啟動
+  if (document.readyState === "loading") await new Promise((r) => document.addEventListener("DOMContentLoaded", r, { once: true }));
+  try { const t = localStorage.getItem("theme"); if (t && t !== "auto") document.documentElement.setAttribute("data-theme", t); } catch (_) {}
+  const raw = JSON.parse(document.getElementById("digest-data").textContent);
+  const KEY = "digest-key";
+  const boot = (data) => {
+    window.__DIGEST__ = data;
+    document.getElementById("lock").hidden = true;
+    document.getElementById("app-root").hidden = false;
+    const lockBtn = document.getElementById("lock-btn");
+    if (raw.enc) {
+      lockBtn.hidden = false;
+      lockBtn.addEventListener("click", () => { try { localStorage.removeItem(KEY); } catch (_) {} location.reload(); });
+    }
+    const s = document.createElement("script");
+    s.textContent = document.getElementById("app").textContent;
+    document.body.append(s);
+  };
+  if (!raw.enc) return boot(raw);
+
+  const bytes = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  const open = async (key) => JSON.parse(new TextDecoder().decode(
+    await crypto.subtle.decrypt({ name: "AES-GCM", iv: bytes(raw.iv) }, key, bytes(raw.data))));
+  const derive = async (pw) => {
+    const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(pw), "PBKDF2", false, ["deriveKey"]);
+    return crypto.subtle.deriveKey({ name: "PBKDF2", hash: "SHA-256", salt: bytes(raw.salt), iterations: raw.iter },
+      base, { name: "AES-GCM", length: 256 }, true, ["decrypt"]);
+  };
+
+  let remembered = null;
+  try {
+    const saved = localStorage.getItem(KEY);
+    if (saved) {
+      const key = await crypto.subtle.importKey("raw", bytes(saved), "AES-GCM", false, ["decrypt"]);
+      remembered = await open(key);
+    }
+  } catch (_) { try { localStorage.removeItem(KEY); } catch (_) {} }   // 只有解不開（換過密碼）才丟掉記住的金鑰
+  if (remembered) return boot(remembered);
+
+  const lock = document.getElementById("lock"), form = document.getElementById("lock-form");
+  const pw = document.getElementById("pw"), btn = document.getElementById("unlock");
+  const err = document.getElementById("lock-err"), remember = document.getElementById("remember");
+  lock.hidden = false;
+  pw.focus();
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    btn.disabled = true; btn.textContent = "解鎖中…"; err.hidden = true;
+    try {
+      const key = await derive(pw.value);
+      const data = await open(key);
+      if (remember.checked) {
+        const rawKey = new Uint8Array(await crypto.subtle.exportKey("raw", key));
+        try { localStorage.setItem(KEY, btoa(String.fromCharCode(...rawKey))); } catch (_) {}
+      }
+      boot(data);
+    } catch (_) {
+      err.hidden = false; btn.disabled = false; btn.textContent = "解鎖"; pw.select();
+    }
+  });
+})();
+</script>
+<script id="app" type="text/plain">
+"use strict";
+const DATA = window.__DIGEST__;
+
+// ---------- 課別 → 固定色槽（色跟著實體走，不跟著排名走）----------
+const CLASS = {
+  E:  { label: "輕鬆跑", slot: 1 },
+  M:  { label: "馬配",   slot: 2 },
+  T:  { label: "節奏",   slot: 3 },
+  I:  { label: "間歇",   slot: 4 },
+  R:  { label: "加速跑", slot: 5 },
+  L:  { label: "長跑",   slot: 6 },
+  XT: { label: "交叉訓練", slot: 0 },
+  TEST: { label: "測驗", slot: 3 },
+  OFF: { label: "休息", slot: 0 },
+};
+const CLASS_ORDER = ["E", "M", "T", "I", "R", "L"];
+const color = (cls) => `var(--c${(CLASS[cls] || CLASS.XT).slot})`;
+const label = (cls) => (CLASS[cls] || { label: cls }).label;
+const WEEKDAY = "一二三四五六日";
+
+// ---------- 格式 ----------
+const pace = (s) => (!s || s <= 0) ? "--" : `${Math.floor(Math.round(s) / 60)}:${String(Math.round(s) % 60).padStart(2, "0")}`;
+const clock = (s) => (!s) ? "--" : `${String(Math.floor(Math.round(s) / 60)).padStart(2, "0")}:${String(Math.round(s) % 60).padStart(2, "0")}`;
+const hm = (s) => (!s) ? "--" : `${Math.floor(s / 3600)}:${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}`;
+const md = (iso) => `${iso.slice(5, 7)}/${iso.slice(8, 10)}`;
+const n0 = (v) => (v == null) ? "--" : String(Math.round(v) + 0);
+const n1 = (v) => (v == null) ? "--" : (Math.round(v * 10) / 10).toFixed(1);
+const g = (v) => (v == null) ? "--" : String(+v.toFixed(2));
+const el = (tag, attrs = {}, ...kids) => {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") e.className = v;
+    else if (k === "text") e.textContent = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (v != null) e.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null) e.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  return e;
+};
+const svgEl = (tag, attrs = {}) => {
+  const e = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const [k, v] of Object.entries(attrs)) if (v != null) e.setAttribute(k, v);
+  return e;
+};
+const daysAsc = [...DATA.days].sort((a, b) => a.date < b.date ? -1 : 1);
+
+// ---------- 主題 ----------
+(function theme() {
+  const btn = document.getElementById("theme");
+  const modes = [["auto", "◐ 自動"], ["light", "○ 淺色"], ["dark", "● 深色"]];
+  let mode = "auto";
+  try { mode = localStorage.getItem("theme") || "auto"; } catch (_) {}
+  const apply = () => {
+    if (mode === "auto") document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", mode);
+    btn.textContent = modes.find(m => m[0] === mode)[1];
+  };
+  btn.addEventListener("click", () => {
+    mode = modes[(modes.findIndex(m => m[0] === mode) + 1) % modes.length][0];
+    try { localStorage.setItem("theme", mode); } catch (_) {}
+    apply();
+    renderCharts();          // SVG 用的顏色是 CSS 變數，重畫一次讓提示框跟上
+  });
+  apply();
+})();
+
+// ---------- 檔頭 ----------
+(function header() {
+  document.getElementById("range").textContent = `${DATA.date_from} ～ ${DATA.date_to}`;
+  const hero = document.getElementById("hero");
+  const goal = DATA.goal_race;
+  if (goal) {
+    const sub = [goal.goal_min ? `${goal.goal_min} 分` : null, goal.goal_pace ? `${goal.goal_pace}/km` : null, md(goal.date)].filter(Boolean).join(" · ");
+    hero.append(el("div", { class: "card tile" },
+      el("div", { class: "label", text: goal.name }),
+      el("div", { class: "value" }, `${DATA.goal_days_left}`, el("small", { text: "天後" })),
+      el("div", { class: "sub", text: sub })));
+  }
+  const w = DATA.current_week;
+  if (w) {
+    const pct = w.target_km ? Math.min(100, w.km / w.target_km * 100) : 0;
+    hero.append(el("div", { class: "card tile" },
+      el("div", { class: "label", text: `W${w.n} ${w.phase}期 · 本週跑量` }),
+      el("div", { class: "value" }, `${n1(w.km)}`, el("small", { text: w.target_km ? `/ ${w.target_km} km` : "km" })),
+      el("div", { class: "meter" }, el("i", { style: `width:${pct}%` })),
+      w.note ? el("div", { class: "sub", text: w.note }) : null));
+  }
+  const t = DATA.trends;
+  hero.append(el("div", { class: "card tile" },
+    el("div", { class: "label", text: "CTL / ATL / TSB" }),
+    el("div", { class: "value" }, `${n0(t.ctl)}`, el("small", { text: `/ ${n0(t.atl)} / ${n0(t.tsb)}` })),
+    el("div", { class: "sub", text: t.hrv_status ? t.hrv_status.split(" — ")[0] : "體能 / 疲勞 / 狀態" })));
+  for (const r of DATA.interim_races || []) {
+    hero.append(el("div", { class: "card tile" },
+      el("div", { class: "label", text: `${r.role || "期中"} · ${md(r.date)}` }),
+      el("div", { class: "value", style: "font-size:18px", text: r.name }),
+      r.note ? el("div", { class: "sub", text: r.note }) : null));
+  }
+  const paces = document.getElementById("paces");
+  for (const k of ["E", "M", "T", "I", "R"]) {
+    const p = DATA.paces[k]; if (!p) continue;
+    const v = p.target || (p.min && p.max ? `${p.min}-${p.max}` : p.min || p.max);
+    paces.append(el("span", {}, el("b", { text: k }), v || "--"));
+  }
+  if (DATA.vdot && DATA.vdot.current) paces.append(el("span", { class: "muted", text: `VDOT ${DATA.vdot.current}` }));
+})();
+
+// ---------- 週統計 ----------
+const state = { week: "all", hideRest: false, flagsOnly: false, openLaps: false };
+try { Object.assign(state, JSON.parse(localStorage.getItem("filters") || "{}")); } catch (_) {}
+const saveState = () => { try { localStorage.setItem("filters", JSON.stringify(state)); } catch (_) {} };
+
+(function weeks() {
+  const legend = document.getElementById("class-legend");
+  for (const c of CLASS_ORDER) legend.append(el("span", {}, el("i", { style: `background:${color(c)}` }), label(c)));
+  const table = document.getElementById("weeks");
+  table.append(el("thead", {}, el("tr", {},
+    ...["週", "日期", "跑量", "強度分布", "負荷", "CTL", "課表", "提醒"].map(h => el("th", { text: h })))));
+  const body = el("tbody");
+  for (const w of DATA.weeks) {
+    const seg = CLASS_ORDER.filter(c => (w.by_class[c] || 0) > 0);
+    const bar = el("div", { class: "bar" }, ...seg.map(c => el("i", { style: `width:${w.by_class[c] / w.km * 100}%;background:${color(c)}`, title: `${label(c)} ${n1(w.by_class[c])} km` })));
+    const txt = seg.map(c => `${c} ${n1(w.by_class[c])}`).join(" / ") || "—";
+    const plan = w.plan_count ? `${w.plan_count} 課 ${g(w.plan_km)}km → ${w.done_count} 課 ${n1(w.done_km)}km` : "";
+    const planNotes = [
+      w.missed.length ? `未執行 ${w.missed.join("、")}` : null,
+      w.extra.length ? `額外 ${w.extra.join("、")}` : null,
+    ].filter(Boolean).join(" · ");
+    const kmCell = w.in_progress
+      ? el("td", { class: "num" }, el("b", { text: n1(w.km) }), el("span", { class: "muted", text: w.target_km ? ` / ${w.target_km}` : "" }))
+      : el("td", { class: "num" }, el("b", { text: n1(w.km) }));
+    const tr = el("tr", { "data-week": `W${w.n}`, tabindex: 0, role: "button" },
+      el("td", {}, el("b", { text: `W${w.n}` }), el("div", { class: "muted", style: "font-size:12px", text: w.phase })),
+      el("td", { class: "num", text: `${md(w.start)}–${md(w.end)}` }),
+      kmCell,
+      el("td", { class: "strip" }, bar, el("div", { class: "txt", text: txt })),
+      el("td", { class: "num", text: w.in_progress ? "進行中" : String(w.load) }),
+      el("td", { class: "num", text: (w.ctl_start == null && w.ctl_end == null) ? "--" : `${n0(w.ctl_start)}→${n0(w.ctl_end)}` }),
+      el("td", { class: "notes" }, plan, planNotes ? el("div", { class: "muted", text: planNotes }) : null),
+      el("td", { class: "notes" }, ...w.warnings.map(x => el("div", { class: "flag serious" }, el("span", { class: "ico", text: "⚠" }), el("span", { text: x })))),
+    );
+    const pick = () => { state.week = state.week === `W${w.n}` ? "all" : `W${w.n}`; saveState(); renderFilters(); renderDays(); document.getElementById("daily").scrollIntoView({ behavior: "smooth", block: "start" }); };
+    tr.addEventListener("click", pick);
+    tr.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
+    body.append(tr);
+  }
+  table.append(body);
+})();
+function syncWeekRows() {
+  for (const tr of document.querySelectorAll("table.weeks tbody tr"))
+    tr.setAttribute("aria-selected", tr.dataset.week === state.week ? "true" : "false");
+}
+
+// ---------- 圖表引擎：折線 / 點，十字線提示，表格檢視 ----------
+function chart(container, spec) {
+  // spec: { title, unit, series:[{name, color, points:[[date, value]], kind:'line'|'dots'|'both', emphasis}],
+  //         band:{lo,hi,label}, zero:bool, invert:bool, yFmt, tableCols }
+  const card = el("div", { class: "card chart" });
+  const tblBtn = el("button", { class: "tbl-btn", type: "button", "aria-pressed": "false", text: "表格" });
+  card.append(el("div", { class: "head" }, el("div", { class: "title" }, spec.title, spec.unit ? el("small", { text: spec.unit }) : null), tblBtn));
+  if (spec.series.length >= 2) {
+    card.append(el("div", { class: "legend" }, ...spec.series.map(s =>
+      el("span", {}, el("i", { class: s.kind === "dots" ? "key" : "key line", style: `background:${s.emphasis === false ? "var(--c0)" : s.color}` }), s.name))));
+  }
+  const plot = el("div", { class: "plot", tabindex: 0, role: "img", "aria-label": spec.title });
+  const dtWrap = el("div", { class: "datatable" });
+  card.append(plot, dtWrap);
+  tblBtn.addEventListener("click", () => {
+    const on = card.dataset.view !== "table";
+    card.dataset.view = on ? "table" : "";
+    tblBtn.setAttribute("aria-pressed", String(on));
+  });
+  container.append(card);
+
+  // 所有日期的聯集；x 軸按真實時間比例，不然只有幾個點的圖會把三週畫成三天
+  const dates = [...new Set(spec.series.flatMap(s => s.points.map(p => p[0])))].sort();
+  const dayNum = (d) => Math.round(Date.parse(d + "T00:00:00Z") / 86400000);
+  const d0 = dates.length ? dayNum(dates[0]) : 0, d1 = dates.length ? dayNum(dates[dates.length - 1]) : 0;
+  const span = Math.max(1, d1 - d0);
+  const idx = new Map(dates.map(d => [d, dayNum(d) - d0]));
+  const lookup = spec.series.map(s => new Map(s.points.filter(p => p[1] != null).map(p => [p[0], p[1]])));
+  const values = spec.series.flatMap(s => s.points.map(p => p[1])).filter(v => v != null);
+  if (spec.band) values.push(spec.band.lo, spec.band.hi);
+  if (spec.zero) values.push(0);
+  const fmt = spec.yFmt || n0;
+
+  // 表格檢視（不靠提示框也讀得到每個值）
+  const tbl = el("table", { class: "data" });
+  tbl.append(el("thead", {}, el("tr", {}, el("th", { text: "日期" }), ...spec.series.map(s => el("th", { text: s.name })))));
+  const tb = el("tbody");
+  for (const d of [...dates].reverse()) tb.append(el("tr", {}, el("td", { text: md(d) }), ...lookup.map(m => el("td", { text: m.has(d) ? fmt(m.get(d)) : "--" }))));
+  tbl.append(tb); dtWrap.append(tbl);
+
+  const draw = () => {
+    plot.replaceChildren();
+    if (!dates.length || !values.length) { plot.append(el("div", { class: "empty", text: "沒有資料" })); return; }
+    const W = Math.max(280, plot.clientWidth || 320), H = 200;
+    const m = { t: 12, r: 14, b: 26, l: 40 };
+    const iw = W - m.l - m.r, ih = H - m.t - m.b;
+    let lo = Math.min(...values), hi = Math.max(...values);
+    if (lo === hi) { lo -= 1; hi += 1; }
+    const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
+    if (spec.zero && lo > 0) lo = 0;
+    const x = (d) => m.l + (dates.length === 1 ? iw / 2 : idx.get(d) / span * iw);
+    const y = (v) => spec.invert ? m.t + (v - lo) / (hi - lo) * ih : m.t + ih - (v - lo) / (hi - lo) * ih;
+    const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, width: W, height: H });
+
+    // 格線 + y 軸刻度（乾淨的整數）
+    const grid = svgEl("g", { class: "grid" }), axis = svgEl("g", { class: "axis" });
+    const step = niceStep(hi - lo, 4);
+    for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9; v += step) {
+      grid.append(svgEl("line", { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v) }));
+      const t = svgEl("text", { x: m.l - 6, y: y(v) + 4, "text-anchor": "end" }); t.textContent = fmt(v); axis.append(t);
+    }
+    svg.append(grid);
+    // 基線區帶（例如 HRV 基線 61-70）：同色系 10% 淡塗
+    if (spec.band) {
+      const y1 = y(spec.band.hi), y2 = y(spec.band.lo);
+      svg.append(svgEl("rect", { x: m.l, y: Math.min(y1, y2), width: iw, height: Math.abs(y2 - y1), fill: "var(--wash)" }));
+    }
+    if (spec.zero) { const b = svgEl("g", { class: "base" }); b.append(svgEl("line", { x1: m.l, x2: W - m.r, y1: y(0), y2: y(0) })); svg.append(b); }
+    // x 軸：固定天數一格（1 / 7 / 14 / 28 天），從最後一天往回數，最右邊一定有刻度
+    const maxTicks = Math.max(2, Math.floor(iw / 64));
+    const stepDays = [1, 2, 7, 14, 28, 56].find(k => span / k <= maxTicks) || 56;
+    for (let dn = d1; dn >= d0; dn -= stepDays) {
+      const iso = new Date(dn * 86400000).toISOString().slice(0, 10);
+      const px = m.l + (dn - d0) / span * iw;
+      if (dn !== d1 && px - m.l < 24) continue;                        // 太靠左會壓到 y 軸
+      const t = svgEl("text", { x: px, y: H - 8, "text-anchor": dn === d1 ? "end" : "middle" });
+      t.textContent = md(iso); axis.append(t);
+    }
+    svg.append(axis);
+
+    // 系列：線 2px 圓角、點 r4 + 2px 表面環
+    spec.series.forEach((s, si) => {
+      const pts = s.points.filter(p => p[1] != null);
+      const ghost = s.emphasis === false;
+      const col = ghost ? "var(--c0)" : s.color;
+      if (s.kind !== "dots") {
+        let d = "", pen = false;
+        for (const p of s.points) {
+          if (p[1] == null) { pen = false; continue; }
+          d += `${pen ? "L" : "M"}${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)} `; pen = true;
+        }
+        svg.append(svgEl("path", { d, fill: "none", stroke: col, "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round", opacity: ghost ? .7 : 1 }));
+        if (s.kind === "line" && pts.length) {   // 只標終點
+          const last = pts[pts.length - 1];
+          svg.append(svgEl("circle", { cx: x(last[0]), cy: y(last[1]), r: 5, fill: "var(--surface)" }));
+          svg.append(svgEl("circle", { cx: x(last[0]), cy: y(last[1]), r: 3.5, fill: col }));
+        }
+      }
+      if (s.kind === "dots" || s.kind === "both") {
+        for (const p of pts) {
+          svg.append(svgEl("circle", { cx: x(p[0]), cy: y(p[1]), r: 6, fill: "var(--surface)" }));
+          svg.append(svgEl("circle", { cx: x(p[0]), cy: y(p[1]), r: 4, fill: col, opacity: ghost ? .8 : 1 }));
+        }
+      }
+    });
+
+    // 十字線 + 提示框：找最近的 x，列出該日所有系列
+    const cross = svgEl("line", { class: "cross", y1: m.t, y2: m.t + ih, visibility: "hidden" });
+    svg.append(cross);
+    const hit = svgEl("rect", { x: m.l, y: m.t, width: iw, height: ih, fill: "transparent", style: "cursor:crosshair" });
+    svg.append(hit);
+    const tip = el("div", { class: "tip", hidden: "" });
+    plot.append(svg, tip);
+    let cur = -1;
+    const show = (i) => {
+      cur = i; const d = dates[i];
+      cross.setAttribute("x1", x(d)); cross.setAttribute("x2", x(d)); cross.setAttribute("visibility", "visible");
+      tip.replaceChildren(el("div", { class: "d", text: `${md(d)} ${WEEKDAY[(new Date(d + "T00:00:00").getDay() + 6) % 7]}` }));
+      spec.series.forEach((s, si) => {
+        const v = lookup[si].get(d);
+        const extra = s.tip && s.tip.get(d);
+        tip.append(el("div", { class: "r" }, el("i", { class: "k", style: `background:${s.emphasis === false ? "var(--c0)" : s.color}` }),
+          el("b", { text: v == null ? "--" : fmt(v) }), el("span", { text: s.name + (extra ? ` · ${extra}` : "") })));
+      });
+      tip.hidden = false;
+      const px = x(d) / W * plot.clientWidth;
+      const flip = px > plot.clientWidth * 0.6;
+      tip.style.left = flip ? "" : `${px + 12}px`; tip.style.right = flip ? `${plot.clientWidth - px + 12}px` : "";
+      tip.style.top = `${m.t}px`;
+    };
+    const hide = () => { cross.setAttribute("visibility", "hidden"); tip.hidden = true; cur = -1; };
+    hit.addEventListener("pointermove", (e) => {
+      const r = svg.getBoundingClientRect();
+      const px = (e.clientX - r.left) / r.width * W;
+      let best = 0, bd = Infinity;
+      dates.forEach((d, i) => { const dd = Math.abs(x(d) - px); if (dd < bd) { bd = dd; best = i; } });
+      show(best);
+    });
+    hit.addEventListener("pointerleave", hide);
+    plot.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowRight") { e.preventDefault(); show(Math.min(dates.length - 1, cur < 0 ? dates.length - 1 : cur + 1)); }
+      else if (e.key === "ArrowLeft") { e.preventDefault(); show(Math.max(0, cur < 0 ? dates.length - 1 : cur - 1)); }
+      else if (e.key === "Escape") hide();
+    });
+    plot.addEventListener("blur", hide);
+  };
+  draw();
+  if (window.ResizeObserver) { let w0 = 0; new ResizeObserver(() => { const w = plot.clientWidth; if (w && Math.abs(w - w0) > 8) { w0 = w; draw(); } }).observe(plot); }
+}
+function niceStep(range, ticks) {
+  const raw = range / ticks, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  for (const f of [1, 2, 2.5, 5, 10]) if (raw <= f * mag) return f * mag;
+  return 10 * mag;
+}
+
+function renderCharts() {
+  const box = document.getElementById("charts");
+  box.replaceChildren();
+  const wd = daysAsc.filter(d => d.wellness);
+  const pick = (k) => wd.map(d => [d.date, d.wellness[k]]);
+
+  chart(box, { title: "體能 / 疲勞 / 狀態", unit: "CTL · ATL · TSB", zero: true,
+    series: [
+      { name: "CTL 體能", color: "var(--c1)", kind: "line", points: pick("ctl") },
+      { name: "ATL 疲勞", color: "var(--c2)", kind: "line", points: pick("atl") },
+      { name: "TSB 狀態", color: "var(--c3)", kind: "line", points: pick("tsb") },
+    ] });
+
+  const bl = DATA.trends.hrv_baseline;
+  chart(box, { title: "HRV", unit: bl ? `ms · 基線 ${bl[0]}–${bl[1]}` : "ms",
+    band: bl && bl.length === 2 ? { lo: bl[0], hi: bl[1] } : null, yFmt: n0,
+    series: [
+      { name: "7 日平均", color: "var(--c1)", kind: "line", points: pick("hrv7") },
+      { name: "單日", color: "var(--c1)", kind: "dots", emphasis: false, points: pick("hrv") },
+    ] });
+
+  chart(box, { title: "靜止心率", unit: "bpm", yFmt: n0,
+    series: [
+      { name: "7 日平均", color: "var(--c1)", kind: "line", points: pick("rhr7") },
+      { name: "單日", color: "var(--c1)", kind: "dots", emphasis: false, points: pick("resting_hr") },
+    ] });
+
+  // E 配速 @ 固定心率：有氧體能進步最可靠的指標。落在心率窗內的點是主角，其餘 E 跑當背景。
+  const [lo, hi] = DATA.trends.e_hr_window;
+  const minKm = DATA.trends.e_min_km || 0;   // 熱身 / 緩和片段不列入
+  const eRuns = daysAsc.flatMap(d => d.activities.filter(a => a.is_run && a.cls === "E" && a.pace_s && a.hr_avg && a.km >= minKm).map(a => [d.date, a]));
+  const inWin = eRuns.filter(([, a]) => a.hr_avg >= lo && a.hr_avg <= hi);
+  const outWin = eRuns.filter(([, a]) => !(a.hr_avg >= lo && a.hr_avg <= hi));
+  const tipOf = (rows) => new Map(rows.map(([d, a]) => [d, `均心 ${a.hr_avg} · ${n1(a.km)}km`]));
+  chart(box, { title: "E 配速", unit: `@ 心率 ${lo}–${hi} · 越上面越快`, invert: true, yFmt: pace,
+    series: [
+      { name: `心率 ${lo}–${hi} 的 E 跑`, color: "var(--c1)", kind: "both", points: inWin.map(([d, a]) => [d, a.pace_s]), tip: tipOf(inWin) },
+      { name: "其他 E 跑", color: "var(--c1)", kind: "dots", emphasis: false, points: outWin.map(([d, a]) => [d, a.pace_s]), tip: tipOf(outWin) },
+    ] });
+}
+renderCharts();
+
+// ---------- 篩選列 ----------
+function renderFilters() {
+  const box = document.getElementById("filters");
+  box.replaceChildren();
+  const weeks = el("div", { class: "grp" });
+  const chip = (key, text) => el("button", { type: "button", class: "chip", "aria-pressed": String(state.week === key), text,
+    onclick: () => { state.week = key; saveState(); renderFilters(); renderDays(); } });
+  weeks.append(chip("all", "全部"));
+  for (const w of DATA.weeks) weeks.append(chip(`W${w.n}`, `W${w.n}`));
+  const toggle = (key, text) => el("label", { class: "check" },
+    el("input", { type: "checkbox", ...(state[key] ? { checked: "" } : {}), onchange: (e) => { state[key] = e.target.checked; saveState(); renderDays(); } }), text);
+  box.append(weeks, el("span", { class: "sep" }), el("div", { class: "grp" },
+    toggle("hideRest", "隱藏休息日"), toggle("flagsOnly", "只看有提醒的"), toggle("openLaps", "展開分段")));
+  syncWeekRows();
+}
+
+// ---------- 每日明細 ----------
+function weekOf(date) {
+  const w = DATA.weeks.find(w => w.start <= date && date <= w.end);
+  return w ? `W${w.n}` : null;
+}
+function renderDays() {
+  const box = document.getElementById("days");
+  box.replaceChildren();
+  let days = DATA.days;
+  if (state.week !== "all") days = days.filter(d => weekOf(d.date) === state.week);
+  if (state.hideRest) days = days.filter(d => d.activities.length);
+  if (state.flagsOnly) days = days.filter(d => d.activities.some(a => a.flags.length) || (d.hrv_note && !d.hrv_repeat && ["warn", "alert"].includes(d.hrv_level)) || d.deviation);
+  if (!days.length) { box.append(el("div", { class: "card empty", text: "這個條件下沒有任何一天" })); return; }
+  for (const d of days) box.append(dayCard(d));
+}
+function dayCard(d) {
+  const w = d.wellness;
+  const dateEl = el("span", { class: "date" }, md(d.date), el("small", { text: d.weekday }));
+  if (!d.activities.length && !d.deviation && !(d.hrv_note && !d.hrv_repeat)) {
+    return el("div", { class: "card day rest" }, dateEl, el("span", { class: "muted", text: "休息" }), w ? el("span", {}, `HRV ${n0(w.hrv)} · RHR ${n0(w.resting_hr)} · 睡 ${hm(w.sleep_secs)}`) : null,
+      w && w.ctl != null ? el("span", { class: "muted" }, `CTL ${n0(w.ctl)} ATL ${n0(w.atl)} TSB ${n0(w.tsb)}`) : null);
+  }
+  const card = el("div", { class: "card day" }, el("div", {}, dateEl, d.activities.length ? null : el("span", { class: "muted", text: "　休息" })));
+  for (const a of d.activities) card.append(activityBlock(a));
+  const row = (k, ...v) => el("div", { class: "row" }, el("span", { class: "k", text: k }), el("span", { class: "v" }, ...v));
+  if (d.deviation) {
+    const r = row("對照", d.deviation, d.plan_desc ? el("div", { class: "desc", text: d.plan_desc }) : null);
+    r.classList.add("devi"); card.append(r);
+  }
+  if (w) {
+    card.append(row("晨間", `HRV `, el("b", { text: n0(w.hrv) }), ` (7日 ${n0(w.hrv7)}) · RHR `, el("b", { text: n0(w.resting_hr) }), ` · 睡 ${hm(w.sleep_secs)}`, w.sleep_score != null ? ` · 睡分 ${n0(w.sleep_score)}` : ""));
+    if (w.ctl != null || w.atl != null) card.append(row("狀態", `CTL ${n0(w.ctl)} ATL ${n0(w.atl)} TSB `, el("b", { text: n0(w.tsb) })));
+  }
+  const flags = el("div", { class: "flags" });
+  if (d.hrv_note && !d.hrv_repeat) {
+    const level = d.hrv_level === "alert" ? "critical" : d.hrv_level === "warn" ? "serious" : d.hrv_level === "ok" ? "good" : "info";
+    flags.append(el("div", { class: `flag ${level}` }, el("span", { class: "ico", text: level === "info" || level === "good" ? "ⓘ" : "⚠" }), el("span", { text: d.hrv_note })));
+  }
+  for (const a of d.activities) for (const f of a.flags)
+    flags.append(el("div", { class: "flag serious" }, el("span", { class: "ico", text: "⚠" }), el("span", { text: f })));
+  for (const a of d.activities) if (a.description)
+    flags.append(el("div", { class: "flag info" }, el("span", { class: "ico", text: "✎" }), el("span", { text: a.description })));
+  if (flags.children.length) card.append(flags);
+  return card;
+}
+function activityBlock(a) {
+  const badge = el("span", { class: "badge" }, el("i", { style: `background:${color(a.cls)}` }), label(a.cls), el("span", { class: "cls", text: a.is_run ? a.cls : a.sport }));
+  const stats = a.is_run
+    ? el("span", { class: "stats" }, el("b", { text: `${n1(a.km)} km` }), ` · `, el("b", { text: `${pace(a.pace_s)}/km` }), ` · 均心 ${a.hr_avg ?? "--"} · 最高 ${a.hr_max ?? "--"} · 負荷 ${a.load ?? "--"}`)
+    : el("span", { class: "stats" }, el("b", { text: a.name || a.sport }), ` · ${Math.round(a.seconds / 60)} 分 · 均心 ${a.hr_avg ?? "--"} · 最高 ${a.hr_max ?? "--"} · 負荷 ${a.load ?? "--"}`);
+  const block = el("div", { class: "act" }, badge, stats);
+  if (a.work_laps.length) {
+    const laps = el("table", { class: "laps" }, ...a.work_laps.map((l, i) => el("tr", {},
+      el("td", { text: String(i + 1) }), el("td", { text: clock(l.seconds) }), el("td", { text: `${(l.meters / 1000).toFixed(2)} km` }),
+      el("td", { text: `${pace(l.pace_s)}/km` }), el("td", { text: l.hr_avg ? (l.hr_max && l.hr_max !== l.hr_avg ? `HR ${l.hr_avg}→${l.hr_max}` : `HR ${l.hr_avg}`) : "HR --" }))));
+    block.append(el("details", { ...(state.openLaps ? { open: "" } : {}) }, el("summary", { text: `工作段 ${a.work_laps.length} 趟` }), laps));
+  }
+  return block;
+}
+renderFilters();
+renderDays();
+</script>
+</body>
+</html>
