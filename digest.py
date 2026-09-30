@@ -61,17 +61,17 @@ def resolve_range(args, today: dt.date):
     return date_from, date_to
 
 
-def local_today(plan: dict) -> dt.date:
-    """依 plan.json 的時區算「今天」。GitHub Actions 的 runner 是 UTC，
+def local_now(plan: dict) -> dt.datetime:
+    """依 plan.json 的時區算「現在」。GitHub Actions 的 runner 是 UTC，
     台北早上六點跑的時候 UTC 還是前一天，直接用 date.today() 會少算一天。"""
     tz_name = (plan.get("meta") or {}).get("timezone")
     if tz_name:
         try:
             from zoneinfo import ZoneInfo
-            return dt.datetime.now(ZoneInfo(tz_name)).date()
+            return dt.datetime.now(ZoneInfo(tz_name))
         except Exception:                       # Windows 可能沒有 tzdata
             pass
-    return dt.datetime.now(dt.timezone(dt.timedelta(hours=8))).date()
+    return dt.datetime.now(dt.timezone(dt.timedelta(hours=8)))
 
 
 def main(argv=None) -> int:
@@ -89,7 +89,8 @@ def main(argv=None) -> int:
         raise SystemExit(f"錯誤：找不到 {plan_path}")
     plan = transform.load_plan(plan_path)
 
-    today = local_today(plan)
+    now = local_now(plan)
+    today = now.date()
     date_from, date_to = resolve_range(args, today)
 
     password = None if args.plain else (os.environ.get("DIGEST_PASSWORD") or None)
@@ -126,7 +127,7 @@ def main(argv=None) -> int:
                              strict_class=args.strict_class)
 
     if args.format == "html":
-        text = render_html.render(digest, password=password)
+        text = render_html.render(digest, generated_at=now, password=password)
         log("網頁已加密" if password else "注意：網頁未加密（沒有 DIGEST_PASSWORD），只適合在本機看")
     elif args.format == "json":
         text = render_html.to_json(digest)
