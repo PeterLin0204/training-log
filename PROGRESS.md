@@ -1,26 +1,26 @@
 # 專案進度
 
-更新：2026-09-27
+更新：2026-09-30
 
-**一句話：文字摘要與互動網頁都做完了。上線剩最後三步，其中兩步要你本人操作（登入 GitHub、設定密碼）。**
+**一句話：上線了。網址 https://peterlin0204.github.io/training-log/ ，每天台北 06:30 自動更新。**
 
 ---
 
 ## 上線進度
 
-| 步驟 | 誰 | 狀態 |
-|---|---|---|
-| 網頁加密（AES-256-GCM，密碼解鎖） | 我 | ✅ 實測通過 |
-| GitHub Actions：每天產生加密網頁 → 直接部署 Pages | 我 | ✅ 寫好 |
-| 安裝 GitHub CLI（gh） | 我 | ✅ v2.101.0 |
-| 公開 repo 的個資掃描（docs/、sample/、.env 不進 repo） | 我 | ✅ |
-| **在 `.env` 加一行 `DIGEST_PASSWORD=…`** | **你** | ⬜ |
-| **`gh auth login` 登入 GitHub** | **你** | ⬜ |
-| 建 repo、第一個 commit、開 Pages | 我 | ⬜ 等你登入 |
-| **`gh secret set -f .env` 上傳三個 secrets** | **你** | ⬜ 等 repo 建好 |
-| push、觸發第一次部署、確認網址能開 | 我 | ⬜ |
+| 項目 | 狀態 |
+|---|---|
+| repo | https://github.com/PeterLin0204/training-log （公開，只有程式碼與 plan.json） |
+| 網頁 | https://peterlin0204.github.io/training-log/ （加密，要密碼） |
+| 自動更新 | 每天台北 06:30；push 程式或 plan.json 也會立即重新發佈 |
+| Secrets | `ICU_ATHLETE_ID`、`ICU_API_KEY`、`DIGEST_PASSWORD` |
+| 已驗證 | 線上 HTML 只有加密資料，搜尋地名、賽事名、帳號、API key 都是 0 筆 |
 
-密碼和 API key 只經過你的手，我不碰。
+### 之後要改東西
+
+- **改課表**：編輯 `plan.json` → `git commit` → `git push`，幾分鐘內網頁更新
+- **換密碼**：改 `.env` 的 `DIGEST_PASSWORD` → `gh secret set -f .env` → Actions 頁按 Run workflow
+- **手動更新**：https://github.com/PeterLin0204/training-log/actions → update digest → Run workflow
 
 ### 加密做了哪些測試
 
