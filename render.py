@@ -75,6 +75,18 @@ def render_header(d: Digest) -> list[str]:
         target = f" / {w.target_km:g} km" if w.target_km else ""
         lines.append(f"現況　W{w.n} {w.phase}期 · 本週 {w.km:.1f}{target}")
 
+    t = d.today
+    if t:
+        light = {"green": "綠燈", "yellow": "黃燈", "red": "紅燈", "gray": "無資料"}[t.light]
+        stale = "" if t.data_date in (None, t.date) else f"（今天還沒同步，用 {md(t.data_date)} 的）"
+        sig = " · ".join(f"{sg.name} {sg.value}（{sg.ref}）" for sg in t.signals)
+        lines.append(f"今日　{light} {t.headline}：{t.prescription}")
+        lines.append(f"　　　{sig}{stale}")
+        for r in t.reasons:
+            lines.append(f"　　　{r}")
+        if t.week_note:
+            lines.append(f"　　　本週：{t.week_note}")
+
     paces = []
     for key in ("E", "M", "T", "I", "R"):
         spec = d.paces.get(key)
@@ -115,6 +127,10 @@ def render_weeks(d: Digest) -> list[str]:
             if w.ctl_start is not None or w.ctl_end is not None:
                 ctl = f"{num(w.ctl_start, 0)}→{num(w.ctl_end, 0)}"
             lines.append(f"{head}負荷 {w.load:<4} CTL {ctl}")
+
+        if w.quality_km:
+            q = " / ".join(f"{c} {w.quality_km[c]:.1f}" for c in ("M", "T", "I", "R") if c in w.quality_km)
+            lines.append(f"    質量  {q} km（工作段實際落在該配速的距離）")
 
         if w.plan_count or w.extra:
             bits = [f"處方 {w.plan_count} 課 {w.plan_km:g}km ／ 實際 {w.done_count} 課 {w.done_km:.1f}km"]

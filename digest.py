@@ -102,9 +102,13 @@ def main(argv=None) -> int:
     except icu.ICUError as exc:
         raise SystemExit(f"錯誤：{exc}")
 
+    # 區間從週中開始時，那一週前半的訓練也要抓，不然週統計會少算、課表會誤判成未執行。
+    # 每日明細仍然只顯示 date_from 之後。
+    fetch_from = date_from - dt.timedelta(days=date_from.weekday())
+
     log = lambda msg: print(msg, file=sys.stderr)
-    log(f"[1/3] 抓活動 {date_from} ~ {date_to} ...")
-    activities = client.activities(date_from.isoformat(), date_to.isoformat())
+    log(f"[1/3] 抓活動 {fetch_from} ~ {date_to} ...")
+    activities = client.activities(fetch_from.isoformat(), date_to.isoformat())
     log(f"      {len(activities)} 筆")
 
     runs = [a for a in activities if (a.get("type") or "") in transform.RUN_TYPES]
@@ -117,7 +121,7 @@ def main(argv=None) -> int:
 
     log("[3/3] 抓健康資料 ...")
     wellness = client.wellness(
-        (date_from - dt.timedelta(days=WELLNESS_LOOKBACK_DAYS)).isoformat(),
+        (fetch_from - dt.timedelta(days=WELLNESS_LOOKBACK_DAYS)).isoformat(),
         date_to.isoformat(),
     )
     log(f"      {len(wellness)} 天\n")

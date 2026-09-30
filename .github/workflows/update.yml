@@ -11,7 +11,11 @@ name: update digest
 
 on:
   schedule:
-    - cron: "30 22 * * *"      # UTC 22:30 = 台北 06:30，晨間 HRV 通常已同步
+    # 首頁「今日狀態」要用當天的晨間 HRV / 靜止心率，但錶什麼時候同步不一定，
+    # 所以早上跑三次：台北 06:30、08:00、10:00（UTC 22:30、00:00、02:00）
+    - cron: "30 22 * * *"
+    - cron: "0 0 * * *"
+    - cron: "0 2 * * *"
   workflow_dispatch:           # Actions 頁面可以手動按
   push:
     branches: [master]

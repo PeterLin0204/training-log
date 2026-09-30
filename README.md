@@ -86,7 +86,7 @@ GitHub Pages 免費版只能從公開 repo 發佈，所以網頁內容是加密�
 
 `.github/workflows/update.yml` 在三種時候重新產生並部署：
 
-- 每天台北時間 06:30
+- 每天台北時間 06:30、08:00、10:00（首頁「今日狀態」要用當天的晨間資料）
 - push 到 `master`（改了程式或 `plan.json`）
 - Actions 頁面手動按 **Run workflow**
 
@@ -209,6 +209,6 @@ intervals.icu 的每日記錄裡填。`soreness` / `fatigue` 是 1-4 分，
   會一直亮。累積一個月資料後值得用實測值重新校準。
 - `transform.RUN_TYPES`：哪些活動類型計入跑量。網球、重訓、飛輪不計跑量，
   但訓練負荷仍計入週負荷（因為 CTL/ATL 本來就含它們）。
-- `quality_caps` 的百分比是拿「整堂課的距離」除以週跑量算的（照 SPEC 的範例）。
-  丹尼爾原意是質量段本身的量，所以現在幾乎每週都會亮 T/I 超標。
-  要改成只算工作段距離的話，改 `transform.build_weeks` 裡的 `by_class`。
+- `quality_caps`：照丹尼爾原意，檢查的是**單堂課**在 M/T/I/R 配速實際跑了多少
+  （工作段依配速歸類），對比週跑量的百分比；進行中的週用目標跑量當分母；
+  測驗日不算；超過上限 `transform.CAP_TOLERANCE`（10%）以上才標。

@@ -44,6 +44,17 @@ QUALITY_CLASSES = {"T", "I", "R", "M", "TEST"}
 # intervals.icu 的 soreness / fatigue 是 1-4 分，數字越大越差
 SUBJECTIVE_BAD = 3
 
+# quality_caps 超過上限多少才標。分段是 1 公里自動切的，頭尾會混進慢的部分，
+# 質量段距離本身就有 ±0.5km 左右的誤差；4.0km 對 3.96km 這種擦邊不值得一個警示。
+CAP_TOLERANCE = 0.10
+
+# 今日狀態：靜止心率比前 7 天平均高幾下算黃燈 / 紅燈（紅燈門檻就是 hrv_decision 的 5 bpm）
+RHR_YELLOW_BPM = 3
+# intervals.icu 的主觀欄位，全部是 1-4 分、數字越大越差
+#（疲勞 / 痠痛 / 壓力：1 低 → 4 極高；心情：1 很好 → 4 很差；動機：1 極高 → 4 很低；傷病：1 無 → 4 受傷）
+SUBJECTIVE_FIELDS = [("fatigue", "疲勞"), ("soreness", "痠痛"), ("stress", "壓力"),
+                     ("mood", "心情"), ("motivation", "動機"), ("injury", "傷病")]
+
 # 趨勢區塊「E 配速@固定心率」的心率窗。點太少會自動放寬，實際使用的窗會印在標題上。
 E_HR_WINDOW = (140, 150)
 E_TREND_MIN_KM = 3.0          # 短於這個距離的 E 跑多半是熱身 / 緩和的片段，不列入趨勢
@@ -213,6 +224,7 @@ class Wellness:
     hrv7: float | None
     rhr7: float | None
     illness: str | None = None        # 主觀不適紀錄，hrv_decision 第 5 條要用
+    subjective: dict = field(default_factory=dict)   # {"疲勞": 2, ...}，只放有填的
 
 
 @dataclass
@@ -252,6 +264,7 @@ class Week:
     done_km: float = 0.0
     missed: list = field(default_factory=list)   # 排了沒做
     extra: list = field(default_factory=list)    # 課表沒排但有跑
+    quality_km: dict = field(default_factory=dict)   # 工作段實際落在 M/T/I/R 配速的距離
 
 
 @dataclass
@@ -270,6 +283,29 @@ class Trends:
 
 
 @dataclass
+class Signal:
+    name: str                 # 靜止心率 / HRV / 主觀
+    value: str                # 顯示用的值
+    ref: str                  # 比較對象
+    light: str                # green / yellow / red / gray
+    note: str = ""
+
+
+@dataclass
+class Today:
+    date: str                 # 今天
+    weekday: str
+    data_date: str | None     # 實際用哪一天的晨間資料（今天還沒同步就用前一天）
+    light: str                # green / yellow / red / gray
+    headline: str             # 可以照課表練 / 質量課降級 / 休息
+    prescription: str         # 今天具體要做什麼
+    reasons: list             # 為什麼是這個燈
+    signals: list
+    session: dict | None      # plan.json 今天排的課
+    week_note: str | None = None      # 7 日平均連續偏低這種「本週」層級的提醒
+
+
+@dataclass
 class Digest:
     date_from: str
     date_to: str
@@ -282,6 +318,7 @@ class Digest:
     weeks: list
     days: list
     trends: Trends
+    today: Today | None = None
 
 
 EMPTY_WELLNESS = Wellness("", None, None, None, None, None, None, None, None, None, None, None)
@@ -591,6 +628,8 @@ def build_wellness(rows):
             hrv7=mean([_hrv_of(w) for w in window]),
             rhr7=mean([w.get("restingHR") for w in window]),
             illness=_illness_hint(row),
+            subjective={label: row[k] for k, label in SUBJECTIVE_FIELDS
+                        if isinstance(row.get(k), (int, float))},
         )
     return out
 
@@ -651,9 +690,57 @@ def build_activities(raw, intervals, plan, bands, e_pace_limit, strict_class):
 CLASS_ORDER = ["E", "M", "T", "I", "R", "L"]
 
 
+def quality_volume(runs, bands):
+    """每一段工作段依「實際配速」歸到 M/T/I/R，回傳 (公里, 秒)。
+
+    丹尼爾的 T 10% / I 8% / R 5% 上限算的是「在那個強度跑了多少」，
+    不是「那堂課總共幾公里」——10km 的節奏課，熱身緩和 5km 不算 T。
+    反過來，長跑最後 3km 拉到 M 配速，那 3km 也要算進 M。
+    """
+    km = {c: 0.0 for c in ("M", "T", "I", "R")}
+    sec = {c: 0.0 for c in ("M", "T", "I", "R")}
+    for a in runs:
+        for lap in a.work_laps:
+            band = band_for_pace(lap.pace_s, bands)
+            if band in km:
+                km[band] += lap.meters / 1000
+                sec[band] += lap.seconds
+    return km, sec
+
+
+def session_cap_warnings(runs, plan, caps, bands, week_km):
+    """rules.quality_caps：丹尼爾的上限是「單堂課」的量，不是一週加總。
+
+    原文是「任何一次訓練中，T 配速的量不超過週跑量的 10%」（I 8%、R 5%、M 20%），
+    M 另有單次 110 分鐘上限。只算工作段實際落在該配速帶的距離，
+    課表排 TEST / RACE 的日子不算（那本來就是全力跑）。
+    """
+    if week_km <= 0:
+        return []
+    sessions = plan.get("sessions") or {}
+    out = []
+    for a in sorted(runs, key=lambda a: a.date):
+        if ((sessions.get(a.date) or {}).get("type")) in ("TEST", "RACE"):
+            continue
+        q_km, q_sec = quality_volume([a], bands)
+        when = f"{a.date[5:7]}/{a.date[8:10]}"
+        for cls in ("T", "I", "R", "M"):
+            cap = caps.get(f"{cls}_pct_of_week")
+            if cap is None:
+                continue
+            limit = week_km * cap / 100
+            if q_km[cls] > limit * (1 + CAP_TOLERANCE):
+                out.append(f"{cls} 單堂 {q_km[cls]:.1f}km（{when}）超過週量的 {cap:g}%（{limit:.1f}km）")
+        m_max = caps.get("M_max_minutes")
+        if m_max and q_sec["M"] / 60 > m_max * (1 + CAP_TOLERANCE):
+            out.append(f"M 單堂 {q_sec['M'] / 60:.0f} 分（{when}）超過 {m_max:g} 分")
+    return out
+
+
 def build_weeks(plan, activities, wellness, date_from, date_to, today):
     caps = (plan.get("rules", {}).get("quality_caps") or {})
     long_rules = (plan.get("rules", {}).get("long_run") or {})
+    bands = build_pace_bands(plan.get("paces") or {})
     weeks = []
 
     for spec in plan.get("weeks", []):
@@ -666,6 +753,7 @@ def build_weeks(plan, activities, wellness, date_from, date_to, today):
         runs = [a for a in in_week if a.is_run]
         km = sum(a.km for a in runs)
         by_class = {c: sum(a.km for a in runs if a.cls == c) for c in CLASS_ORDER}
+        q_km, q_sec = quality_volume(runs, bands)
         load = sum(a.load or 0 for a in in_week)
 
         ctl_start = (wellness.get(start.isoformat()) or EMPTY_WELLNESS).ctl
@@ -678,15 +766,11 @@ def build_weeks(plan, activities, wellness, date_from, date_to, today):
                     break
 
         warnings = []
+        # 進行中的週用目標跑量當分母，不然週一跑完一堂節奏課就是「佔 60%」
+        in_progress = start <= today <= end
+        denom = max(km, spec.get("target_km") or 0) if in_progress else km
+        warnings += session_cap_warnings(runs, plan, caps, bands, denom)
         if km > 0:
-            for cls in ("T", "I", "R", "M"):
-                cap = caps.get(f"{cls}_pct_of_week")
-                if cap is None:
-                    continue
-                pct = by_class.get(cls, 0.0) / km * 100
-                if pct > cap:
-                    warnings.append(f"{cls} 佔 {pct:.0f}%（上限 {cap:.0f}%）")
-
             long_cap = long_rules.get("max_pct_of_week")
             if long_cap is not None:
                 pct = by_class.get("L", 0.0) / km * 100
@@ -699,12 +783,6 @@ def build_weeks(plan, activities, wellness, date_from, date_to, today):
                 if a.cls == "L" and a.seconds / 60 > long_max_min:
                     warnings.append(f"長跑 {a.seconds / 60:.0f} 分（上限 {long_max_min:.0f} 分）")
                     break
-
-        m_max_min = caps.get("M_max_minutes")
-        if m_max_min:
-            m_minutes = sum(a.seconds for a in runs if a.cls == "M") / 60
-            if m_minutes > m_max_min:
-                warnings.append(f"M 配速 {m_minutes:.0f} 分（上限 {m_max_min:.0f} 分）")
 
         (plan_count, plan_km, done_count, done_km,
          missed, extra) = week_plan_stats(plan, start, end, runs, today)
@@ -729,6 +807,7 @@ def build_weeks(plan, activities, wellness, date_from, date_to, today):
             done_km=done_km,
             missed=missed,
             extra=extra,
+            quality_km={c: round(v, 2) for c, v in q_km.items() if v > 0},
         ))
 
     return check_volume_ramp(weeks, plan, date_from)
@@ -982,8 +1061,172 @@ def annotate_hrv(days, wellness, plan):
     return days
 
 
+# ---------- 今日狀態 ----------
+
+LIGHT_ORDER = {"gray": 0, "green": 1, "yellow": 2, "red": 3}
+QUALITY_TYPES = {"T", "I", "R", "M", "TEST"}
+TYPE_LABEL = {"E": "輕鬆跑", "M": "馬配", "T": "節奏", "I": "間歇", "R": "加速跑",
+              "L": "長跑", "TEST": "測驗", "OFF": "休息"}
+
+
+def _hrv_action(plan, needle):
+    for rule in ((plan.get("rules") or {}).get("hrv_decision") or []):
+        if needle in (rule.get("when") or ""):
+            return (rule.get("action") or "").strip()
+    return ""
+
+
+def build_today(plan, days, wellness, today):
+    """首頁那一行：今天練不練、練什麼。
+
+    三個訊號各自亮燈，總燈號照 plan.json 的 hrv_decision 走：
+      紅（休息）：主觀有 4 分 / 傷病 ≥ 3，或 HRV 低於基線且靜止心率高 5 下以上
+      黃（降級）：HRV 連續 2 天低於基線，或靜止心率單獨高 5 下，或主觀有 3 分
+      綠：其他。HRV 單日偏低只在那個訊號上亮黃，不影響總燈號——
+          plan.json 說前一天有質量課時這是正常的，沒有的話也只是「留意」。
+    「HRV 7 日平均連續偏低」是一週的減量決定，不是今天的，另外寫在 week_note。
+    """
+    key = today.isoformat()
+    well = wellness.get(key)
+    has_data = lambda w: w is not None and (w.hrv is not None or w.resting_hr is not None)
+    data_date = key if has_data(well) else None
+    if data_date is None:                        # 今天的晨間資料還沒同步
+        for back in range(1, 4):
+            probe = (today - dt.timedelta(days=back)).isoformat()
+            if has_data(wellness.get(probe)):
+                data_date, well = probe, wellness[probe]
+                break
+
+    session = (plan.get("sessions") or {}).get(key)
+    signals, reasons = [], []
+
+    # 靜止心率 vs 前 7 天平均（不含當天，不然當天的高點會把平均一起拉高）
+    rhr_rise = None
+    if well and well.resting_hr is not None:
+        d0 = to_date(data_date)
+        prev = [wellness[x].resting_hr for x in
+                ((d0 - dt.timedelta(days=i)).isoformat() for i in range(1, 8))
+                if x in wellness and wellness[x].resting_hr is not None]
+        if prev:
+            avg = sum(prev) / len(prev)
+            rhr_rise = well.resting_hr - avg
+            light = ("red" if rhr_rise >= HRV_RHR_RISE_BPM else
+                     "yellow" if rhr_rise >= RHR_YELLOW_BPM else "green")
+            signals.append(Signal("靜止心率", f"{well.resting_hr}", f"7 日 {avg:.0f}，{rhr_rise:+.0f}", light))
+        else:
+            signals.append(Signal("靜止心率", f"{well.resting_hr}", "7 日平均不足", "gray"))
+    else:
+        signals.append(Signal("靜止心率", "--", "沒有資料", "gray"))
+
+    # HRV vs plan.json 的基線
+    baseline = (plan.get("athlete") or {}).get("hrv_baseline") or []
+    hrv_low = hrv_streak = 0
+    if well and well.hrv is not None and baseline:
+        floor = baseline[0]
+        d0 = to_date(data_date)
+        while True:                               # 連續幾天低於基線（含今天）
+            w = wellness.get((d0 - dt.timedelta(days=hrv_streak)).isoformat())
+            if w and w.hrv is not None and w.hrv < floor:
+                hrv_streak += 1
+            else:
+                break
+        hrv_low = hrv_streak > 0
+        light = "red" if hrv_streak >= HRV_STREAK_DAYS else "yellow" if hrv_low else "green"
+        note = f"連續 {hrv_streak} 天偏低" if hrv_streak >= 2 else ""
+        ref = f"基線 {baseline[0]}–{baseline[1]}" if len(baseline) > 1 else f"基線 {floor}"
+        signals.append(Signal("HRV", f"{well.hrv:.0f}", ref, light, note))
+    else:
+        signals.append(Signal("HRV", "--", "沒有資料", "gray"))
+
+    # 主觀分數：取最差的一項
+    subj = well.subjective if well else {}
+    if subj:
+        worst_label, worst = max(subj.items(), key=lambda kv: kv[1])
+        light = "red" if worst >= 4 else "yellow" if worst >= SUBJECTIVE_BAD else "green"
+        injury = subj.get("傷病", 0)
+        if injury >= SUBJECTIVE_BAD:
+            light = "red"
+        detail = " · ".join(f"{k} {v:g}" for k, v in subj.items())
+        signals.append(Signal("主觀", f"{worst_label} {worst:g}", detail, light))
+    else:
+        signals.append(Signal("主觀", "未填", "在 intervals.icu 記疲勞、痠痛就會納入", "gray"))
+    subj_light = signals[-1].light
+
+    # 總燈號
+    if subj_light == "red":
+        light = "red"; reasons.append("主觀分數有 4 分或傷病")
+    elif hrv_low and rhr_rise is not None and rhr_rise >= HRV_RHR_RISE_BPM:
+        light = "red"; reasons.append(f"HRV 低於基線，同時靜止心率高 {rhr_rise:.0f} 下 — "
+                                      f"{_hrv_action(plan, '靜止心率升高') or '休息'}")
+    elif hrv_streak >= HRV_STREAK_DAYS:
+        light = "yellow"; reasons.append(f"HRV 連續 {hrv_streak} 天低於基線 — "
+                                         f"{_hrv_action(plan, '連續 2-3 天') or '質量課降級'}")
+    elif rhr_rise is not None and rhr_rise >= HRV_RHR_RISE_BPM:
+        light = "yellow"; reasons.append(f"靜止心率比平常高 {rhr_rise:.0f} 下")
+    elif subj_light == "yellow":
+        light = "yellow"; reasons.append("主觀分數有 3 分")
+    elif all(sg.light == "gray" for sg in signals):
+        light = "gray"; reasons.append("沒有晨間資料")
+    else:
+        light = "green"
+        if hrv_low:
+            prev_day = next((d for d in days if d.date == (to_date(data_date) - dt.timedelta(days=1)).isoformat()), None)
+            if prev_day and any(a.cls in QUALITY_CLASSES for a in prev_day.activities):
+                reasons.append(f"HRV 單日偏低，但前一天有質量課 — {_hrv_action(plan, '前一天有質量課') or '正常'}")
+            else:
+                reasons.append("HRV 單日偏低，明天再看一次")
+
+    # 處方
+    stype = (session or {}).get("type")
+    label = TYPE_LABEL.get(stype, stype or "")
+    km_text = f" {session['km']:g}km" if session and session.get("km") else ""
+    desc = f" — {session['desc']}" if session and session.get("desc") else ""
+    e_spec = (plan.get("paces") or {}).get("E") or {}
+    e_pace = e_spec.get("target") or "-".join(x for x in (e_spec.get("min"), e_spec.get("max")) if x)
+    if light == "red":
+        headline = "休息"
+        prescription = "今天休息" + (f"，課表的{label}課往後推" if stype and stype != "OFF" else "")
+    elif light == "yellow":
+        headline = "降級"
+        if stype in QUALITY_TYPES:
+            prescription = f"{label}課改成 E 40 分（{e_pace}），或整堂往後推一天"
+        elif stype == "OFF":
+            prescription = "照課表休息"
+        elif stype:
+            prescription = f"照課表{label}{km_text}，強度壓在 E（{e_pace}）"
+        else:
+            prescription = f"今天課表沒排；要練就只做 E（{e_pace}），質量課往後推"
+    elif light == "green":
+        headline = "照課表練"
+        prescription = f"{label}{km_text}{desc}" if stype else "今天課表沒排，照你的計畫練"
+    else:
+        headline = "沒有資料"
+        prescription = (f"{label}{km_text}{desc}" if stype else "今天課表沒排") + "（沒有晨間資料可以判斷）"
+
+    week_note = None
+    if baseline and well and well.hrv7 is not None and well.hrv7 < baseline[0]:
+        streak7 = 0
+        d0 = to_date(data_date)
+        while True:
+            w = wellness.get((d0 - dt.timedelta(days=streak7)).isoformat())
+            if w and w.hrv7 is not None and w.hrv7 < baseline[0]:
+                streak7 += 1
+            else:
+                break
+        if streak7 >= HRV_STREAK7_DAYS:
+            week_note = (f"HRV 7 日平均 {well.hrv7:.1f} 已連續 {streak7} 天低於基線 {baseline[0]} — "
+                         f"{_hrv_action(plan, '7 日平均') or '考慮減量'}")
+
+    return Today(
+        date=key, weekday=WEEKDAY_ZH[today.weekday()], data_date=data_date,
+        light=light, headline=headline, prescription=prescription, reasons=reasons,
+        signals=signals, session=session, week_note=week_note,
+    )
+
+
 def build_trends(plan, activities, wellness, date_from, date_to):
-    runs = [a for a in activities if a.is_run and a.pace_s]
+    start = date_from.isoformat()
+    runs = [a for a in activities if a.is_run and a.pace_s and a.date >= start]
 
     # E 配速@固定心率 — 判斷有氧體能進步最可靠的指標。
     # 這個帳號的 E 跑均心多落在 137-145，固定 140-150 常常只抓到一兩點，
@@ -1057,6 +1300,8 @@ def build(plan, raw_activities, intervals, raw_wellness, date_from, date_to,
     days_left = (to_date(goal["date"]) - today).days if goal else None
     current = next((w for w in weeks if w.in_progress), weeks[-1] if weeks else None)
 
+    today_status = build_today(plan, days, wellness, today)
+
     return Digest(
         date_from=date_from.isoformat(),
         date_to=date_to.isoformat(),
@@ -1069,4 +1314,5 @@ def build(plan, raw_activities, intervals, raw_wellness, date_from, date_to,
         weeks=weeks,
         days=days,
         trends=trends,
+        today=today_status,
     )
