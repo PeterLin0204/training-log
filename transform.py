@@ -18,13 +18,13 @@ from pathlib import Path
 # 計入「跑量」的活動類型。網球 / 重訓 / 飛輪不算跑量，但訓練負荷仍計入。
 RUN_TYPES = {"Run", "VirtualRun", "TrailRun", "Treadmill", "TrackRun"}
 
-# 工作段判定（SPEC）：配速快於 E 下限，且距離大於 150m
+# 主課表段判定（SPEC）：配速快於 E 下限，且距離大於 150m
 WORK_LAP_MIN_METERS = 150
 
 # 沒有課表對照時，多久以上的跑步視為長跑
 LONG_RUN_MIN_MINUTES = 70
 
-# 工作段要佔多少，才算「質量課」而不是「輕鬆跑後面加幾趟加速」。
+# 主課表段要佔多少，才算「質量課」而不是「輕鬆跑後面加幾趟加速」。
 # 長跑的門檻更高：95 分鐘長跑最後 2km 拉到 M/T，仍然是長跑，不是節奏課。
 QUALITY_MIN_KM = 1.0
 QUALITY_MIN_SHARE = 0.15
@@ -47,6 +47,9 @@ SUBJECTIVE_BAD = 3
 # quality_caps 超過上限多少才標。分段是 1 公里自動切的，頭尾會混進慢的部分，
 # 質量段距離本身就有 ±0.5km 左右的誤差；4.0km 對 3.96km 這種擦邊不值得一個警示。
 CAP_TOLERANCE = 0.10
+
+# 每日記錄的備註提到這些字，才當作 hrv_decision 第 5 條的「生病」
+ILLNESS_WORDS = ("喉嚨", "感冒", "發燒", "體溫", "生病", "咳", "鼻水", "鼻塞", "頭痛", "腸胃", "拉肚子")
 
 # 今日狀態：靜止心率比前 7 天平均高幾下算黃燈 / 紅燈（紅燈門檻就是 hrv_decision 的 5 bpm）
 RHR_YELLOW_BPM = 3
@@ -264,7 +267,7 @@ class Week:
     done_km: float = 0.0
     missed: list = field(default_factory=list)   # 排了沒做
     extra: list = field(default_factory=list)    # 課表沒排但有跑
-    quality_km: dict = field(default_factory=dict)   # 工作段實際落在 M/T/I/R 配速的距離
+    quality_km: dict = field(default_factory=dict)   # 主課表段實際落在 M/T/I/R 配速的距離
 
 
 @dataclass
@@ -319,6 +322,7 @@ class Digest:
     days: list
     trends: Trends
     today: Today | None = None
+    today_rules: dict | None = None   # 網頁打開時即時重算「今日狀態」用，數字跟 build_today 同一份
 
 
 EMPTY_WELLNESS = Wellness("", None, None, None, None, None, None, None, None, None, None, None)
@@ -327,7 +331,7 @@ EMPTY_WELLNESS = Wellness("", None, None, None, None, None, None, None, None, No
 # ---------- 分段解析 ----------
 
 def parse_laps(raw_intervals, e_pace_limit):
-    """把 icu_intervals 轉成工作段清單。
+    """把 icu_intervals 轉成主課表段清單。
 
     已驗證：欄位名無 icu_ 前綴，是 distance / moving_time /
     average_heartrate / max_heartrate / average_speed。
@@ -408,7 +412,7 @@ def infer_class(act: dict, laps, bands):
 
     total_m = act.get("distance") or 0
     work_m = sum(l.meters for l in laps)
-    # 工作段太少就不算質量課：E 30 分尾巴加 4x150m，主課仍然是 E
+    # 主課表段太少就不算質量課：E 30 分尾巴加 4x150m，主課仍然是 E
     share = QUALITY_MIN_SHARE_LONG if is_long else QUALITY_MIN_SHARE
     is_quality = work_m >= max(QUALITY_MIN_KM * 1000, total_m * share)
 
@@ -458,7 +462,7 @@ def _advice_map(plan: dict):
 def quality_laps(laps, cls, bands):
     """只留「至少和本課強度一樣快」的分段。
 
-    SPEC 的工作段規則（快於 5:45 且大於 150m）會把 5:43 的熱身公里也算進來，
+    SPEC 的主課表段規則（快於 5:45 且大於 150m）會把 5:43 的熱身公里也算進來，
     拿它跟節奏趟比趟末心率會得出 33 bpm 這種假警訊。laps 區塊照 SPEC 原樣印，
     但規則檢查只看真正的質量趟。
     """
@@ -593,8 +597,7 @@ def _illness_hint(row):
     """主觀不適紀錄，給 hrv_decision 的第 5 條規則（喉嚨痛 / 體溫異常）用。
 
     intervals.icu 的 injury / soreness / fatigue 是 1-4 分，數字越大越差；
-    comments 是自由文字。這個帳號目前四個欄位全空，所以第 5 條規則等於待命，
-    要它生效就得在 intervals.icu 的每日記錄裡填。
+    comments 是自由文字，只有提到生病相關的字才算——寫「睡不好」不該讓今天亮紅燈。
     """
     bits = []
     for field_name, label in (("injury", "傷病"), ("soreness", "痠痛"), ("fatigue", "疲勞")):
@@ -602,7 +605,7 @@ def _illness_hint(row):
         if isinstance(value, (int, float)) and value >= SUBJECTIVE_BAD:
             bits.append(f"{label} {value:g}")
     note = (row.get("comments") or "").strip()
-    if note:
+    if note and any(word in note for word in ILLNESS_WORDS):
         bits.append(note[:30])
     return " · ".join(bits) or None
 
@@ -691,7 +694,7 @@ CLASS_ORDER = ["E", "M", "T", "I", "R", "L"]
 
 
 def quality_volume(runs, bands):
-    """每一段工作段依「實際配速」歸到 M/T/I/R，回傳 (公里, 秒)。
+    """每一段主課表段依「實際配速」歸到 M/T/I/R，回傳 (公里, 秒)。
 
     丹尼爾的 T 10% / I 8% / R 5% 上限算的是「在那個強度跑了多少」，
     不是「那堂課總共幾公里」——10km 的節奏課，熱身緩和 5km 不算 T。
@@ -712,7 +715,7 @@ def session_cap_warnings(runs, plan, caps, bands, week_km):
     """rules.quality_caps：丹尼爾的上限是「單堂課」的量，不是一週加總。
 
     原文是「任何一次訓練中，T 配速的量不超過週跑量的 10%」（I 8%、R 5%、M 20%），
-    M 另有單次 110 分鐘上限。只算工作段實際落在該配速帶的距離，
+    M 另有單次 110 分鐘上限。只算主課表段實際落在該配速帶的距離，
     課表排 TEST / RACE 的日子不算（那本來就是全力跑）。
     """
     if week_km <= 0:
@@ -1076,6 +1079,45 @@ def _hrv_action(plan, needle):
     return ""
 
 
+def _e_pace(plan):
+    e_spec = (plan.get("paces") or {}).get("E") or {}
+    return e_spec.get("target") or "-".join(x for x in (e_spec.get("min"), e_spec.get("max")) if x)
+
+
+def build_today_rules(plan, today):
+    """給網頁的「今日狀態」即時重算用。
+
+    網頁打開時會直接向 Intervals.icu 抓當天的晨間資料，用這份規則在瀏覽器裡重算一次，
+    所以不必等 GitHub 排程重新產生網頁。門檻數字全部從這裡來，跟 build_today 同一份；
+    判斷順序寫在 web/template.html 的 computeToday()，改規則時兩邊要一起改。
+    """
+    sessions = plan.get("sessions") or {}
+    lo, hi = (today - dt.timedelta(days=7)).isoformat(), (today + dt.timedelta(days=28)).isoformat()
+    return {
+        "hrv_baseline": (plan.get("athlete") or {}).get("hrv_baseline") or [],
+        "rhr_red": HRV_RHR_RISE_BPM,
+        "rhr_yellow": RHR_YELLOW_BPM,
+        "hrv_streak_days": HRV_STREAK_DAYS,
+        "hrv_streak7_days": HRV_STREAK7_DAYS,
+        "subjective_bad": SUBJECTIVE_BAD,
+        "subjective_fields": SUBJECTIVE_FIELDS,
+        "illness_words": list(ILLNESS_WORDS),
+        "quality_types": sorted(QUALITY_TYPES),
+        "quality_classes": sorted(QUALITY_CLASSES),
+        "run_types": sorted(RUN_TYPES),
+        "type_label": TYPE_LABEL,
+        "e_pace": _e_pace(plan),
+        "actions": {
+            "prev_quality": _hrv_action(plan, "前一天有質量課"),
+            "streak": _hrv_action(plan, "連續 2-3 天"),
+            "streak7": _hrv_action(plan, "7 日平均"),
+            "rhr": _hrv_action(plan, "靜止心率升高"),
+            "illness": _hrv_action(plan, "喉嚨痛"),
+        },
+        "sessions": {d: v for d, v in sessions.items() if lo <= d <= hi},
+    }
+
+
 def build_today(plan, days, wellness, today):
     """首頁那一行：今天練不練、練什麼。
 
@@ -1153,8 +1195,11 @@ def build_today(plan, days, wellness, today):
     subj_light = signals[-1].light
 
     # 總燈號
+    illness = bool(well and any(w in (well.illness or "") for w in ILLNESS_WORDS))
     if subj_light == "red":
         light = "red"; reasons.append("主觀分數有 4 分或傷病")
+    elif illness and hrv_low:
+        light = "red"; reasons.append(f"HRV 低於基線，且每日記錄提到身體不適 — {_hrv_action(plan, '喉嚨痛') or '停練'}")
     elif hrv_low and rhr_rise is not None and rhr_rise >= HRV_RHR_RISE_BPM:
         light = "red"; reasons.append(f"HRV 低於基線，同時靜止心率高 {rhr_rise:.0f} 下 — "
                                       f"{_hrv_action(plan, '靜止心率升高') or '休息'}")
@@ -1163,6 +1208,8 @@ def build_today(plan, days, wellness, today):
                                          f"{_hrv_action(plan, '連續 2-3 天') or '質量課降級'}")
     elif rhr_rise is not None and rhr_rise >= HRV_RHR_RISE_BPM:
         light = "yellow"; reasons.append(f"靜止心率比平常高 {rhr_rise:.0f} 下")
+    elif illness:          # plan.json 只寫了「HRV 低且生病 → 停練」；HRV 正常時保守一點，降級
+        light = "yellow"; reasons.append("每日記錄提到身體不適，質量課先降級")
     elif subj_light == "yellow":
         light = "yellow"; reasons.append("主觀分數有 3 分")
     elif all(sg.light == "gray" for sg in signals):
@@ -1181,8 +1228,7 @@ def build_today(plan, days, wellness, today):
     label = TYPE_LABEL.get(stype, stype or "")
     km_text = f" {session['km']:g}km" if session and session.get("km") else ""
     desc = f" — {session['desc']}" if session and session.get("desc") else ""
-    e_spec = (plan.get("paces") or {}).get("E") or {}
-    e_pace = e_spec.get("target") or "-".join(x for x in (e_spec.get("min"), e_spec.get("max")) if x)
+    e_pace = _e_pace(plan)
     if light == "red":
         headline = "休息"
         prescription = "今天休息" + (f"，課表的{label}課往後推" if stype and stype != "OFF" else "")
@@ -1196,6 +1242,9 @@ def build_today(plan, days, wellness, today):
             prescription = f"照課表{label}{km_text}，強度壓在 E（{e_pace}）"
         else:
             prescription = f"今天課表沒排；要練就只做 E（{e_pace}），質量課往後推"
+    elif light == "green" and stype == "OFF":
+        headline = "休息日"
+        prescription = (session.get("desc") or "照課表休息") if session else "照課表休息"
     elif light == "green":
         headline = "照課表練"
         prescription = f"{label}{km_text}{desc}" if stype else "今天課表沒排，照你的計畫練"
@@ -1301,6 +1350,7 @@ def build(plan, raw_activities, intervals, raw_wellness, date_from, date_to,
     current = next((w for w in weeks if w.in_progress), weeks[-1] if weeks else None)
 
     today_status = build_today(plan, days, wellness, today)
+    today_rules = build_today_rules(plan, today)
 
     return Digest(
         date_from=date_from.isoformat(),
@@ -1315,4 +1365,5 @@ def build(plan, raw_activities, intervals, raw_wellness, date_from, date_to,
         days=days,
         trends=trends,
         today=today_status,
+        today_rules=today_rules,
     )

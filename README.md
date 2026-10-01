@@ -77,6 +77,11 @@ GitHub Pages 免費版只能從公開 repo 發佈，所以網頁內容是加密�
 - 換密碼（改 `DIGEST_PASSWORD` secret）之後，所有裝置都會重新要密碼
 - 右上角「鎖定」會忘掉這台裝置記住的金鑰
 
+解鎖之後網頁會用 Intervals.icu 的 API key 做兩件事：打開時即時抓今天的晨間資料重算
+「今日狀態」，以及把課後筆記寫回活動描述。API key 只放在**加密版**的資料裡
+（`render_html.py`），明文版和 `--format json` 都沒有。所以網頁密碼同時保護著
+Intervals.icu 帳號的讀寫權限。
+
 **repo 本身是公開的**：程式碼和 `plan.json`（賽事、配速、`athlete.notes`）任何人都看得到。
 訓練與健康資料只存在加密的網頁裡，`docs/`、`sample/`、`.env` 都不會進 repo。
 
@@ -86,7 +91,7 @@ GitHub Pages 免費版只能從公開 repo 發佈，所以網頁內容是加密�
 
 `.github/workflows/update.yml` 在三種時候重新產生並部署：
 
-- 每天台北時間 06:30、08:00、10:00（首頁「今日狀態」要用當天的晨間資料）
+- 每天台灣時間 06:17、09:17、21:17（避開整點；GitHub 排程可能延遲或跳過）
 - push 到 `master`（改了程式或 `plan.json`）
 - Actions 頁面手動按 **Run workflow**
 
@@ -127,8 +132,8 @@ SPEC 要求先確認再寫解析。2026-08-27 對 我的帳號 實際打過的�
 
 強度（E / M / T / I / R / L）的判定順序：
 
-1. **工作段配速回推**：取累積工作距離最多的配速分帶當課別。
-   工作段要佔全程 15% 以上、且至少 1km，才算質量課——
+1. **主課表段配速回推**：取累積工作距離最多的配速分帶當課別。
+   主課表段要佔全程 15% 以上、且至少 1km，才算質量課——
    E 30 分尾巴加 4x150m 加速，主課仍然是 E 而不是 R。
 2. 時長 ≥ 70 分而主帶是 E/M 的 → 長跑
 3. 資料看不出東西時，才看活動名稱關鍵字（節奏 / 間歇 / 長跑 …）
@@ -154,7 +159,7 @@ SPEC 要求先確認再寫解析。2026-08-27 對 我的帳號 實際打過的�
 距離差 20% 以內、強度相同視為照做（`transform.KM_TOLERANCE`）。
 還沒到的日子不算未執行。
 
-## 工作段過濾
+## 主課表段過濾
 
 `laps` 區塊照 SPEC：配速快於 E 下限（5:45）且距離大於 150m。
 濾完是空的就整個區塊不印。
@@ -200,7 +205,7 @@ intervals.icu 的每日記錄裡填。`soreness` / `fatigue` 是 1-4 分，
   點數不足（少於 3 點）時程式會自動放寬 ±5 / ±10，短於 3km 的熱身緩和片段不算，
   實際使用的窗會印在該行標題上。
 - `transform.LONG_RUN_MIN_MINUTES`：多久算長跑，預設 70 分。
-- `transform.QUALITY_MIN_KM` / `QUALITY_MIN_SHARE`：工作段要多少才算質量課，
+- `transform.QUALITY_MIN_KM` / `QUALITY_MIN_SHARE`：主課表段要多少才算質量課，
   預設「至少 1km 且佔全程 15%」。
 - `transform.REP_MIN_SECONDS`：短於幾秒算加速跑而非間歇趟，預設 60 秒。
 - `transform.HRV_RHR_RISE_BPM` / `HRV_STREAK_DAYS` / `HRV_STREAK7_DAYS`：
@@ -210,5 +215,5 @@ intervals.icu 的每日記錄裡填。`soreness` / `fatigue` 是 1-4 分，
 - `transform.RUN_TYPES`：哪些活動類型計入跑量。網球、重訓、飛輪不計跑量，
   但訓練負荷仍計入週負荷（因為 CTL/ATL 本來就含它們）。
 - `quality_caps`：照丹尼爾原意，檢查的是**單堂課**在 M/T/I/R 配速實際跑了多少
-  （工作段依配速歸類），對比週跑量的百分比；進行中的週用目標跑量當分母；
+  （主課表段依配速歸類），對比週跑量的百分比；進行中的週用目標跑量當分母；
   測驗日不算；超過上限 `transform.CAP_TOLERANCE`（10%）以上才標。

@@ -56,6 +56,11 @@ def render(digest, generated_at: dt.datetime | None = None, password: str | None
     stamp = (generated_at or dt.datetime.now()).strftime("%Y-%m-%d %H:%M")
     if password:
         payload = asdict(digest) if is_dataclass(digest) else digest
+        # Intervals.icu 的帳號與金鑰只放進「加密」的版本：解鎖後網頁才能即時抓今日狀態、
+        # 寫課後筆記。明文版（本機看的）不放，免得檔案被轉傳時連金鑰一起送出去。
+        athlete, key = os.environ.get("ICU_ATHLETE_ID"), os.environ.get("ICU_API_KEY")
+        if athlete and key:
+            payload = {**payload, "icu": {"athlete": athlete.strip(), "key": key.strip()}}
         data = encrypt(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), password)
     else:
         data = to_json(digest)

@@ -130,7 +130,7 @@ def render_weeks(d: Digest) -> list[str]:
 
         if w.quality_km:
             q = " / ".join(f"{c} {w.quality_km[c]:.1f}" for c in ("M", "T", "I", "R") if c in w.quality_km)
-            lines.append(f"    質量  {q} km（工作段實際落在該配速的距離）")
+            lines.append(f"    質量  {q} km（主課表段實際落在該配速的距離）")
 
         if w.plan_count or w.extra:
             bits = [f"處方 {w.plan_count} 課 {w.plan_km:g}km ／ 實際 {w.done_count} 課 {w.done_km:.1f}km"]

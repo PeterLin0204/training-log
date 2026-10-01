@@ -223,10 +223,32 @@ footer { margin-top: 40px; font-size: 12px; color: var(--muted); text-align:cent
 #lock button[disabled] { opacity: .6; cursor: progress; }
 .err { color: var(--critical); }
 .top .actions { display:flex; gap: 8px; }
+/* 課後筆記 */
+.note { grid-column: 2; font-size: 13.5px; display:flex; flex-direction:column; gap: 6px; }
+.note-text { display:flex; gap: 6px; color: var(--ink); white-space: pre-wrap; }
+.note-text .ico { color: var(--muted); flex: none; }
+.note-btn { align-self: flex-start; font-size: 12.5px; padding: 2px 10px; color: var(--ink-2); }
+.note textarea {
+  font: inherit; width: 100%; resize: vertical; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid var(--axis); background: var(--page); color: var(--ink);
+}
+.note textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.note-bar { display:flex; gap: 8px; align-items:center; flex-wrap: wrap; }
+.note-bar .count { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; margin-right: auto; }
+.note-bar .count.over { color: var(--critical); }
+.note-bar .err { color: var(--critical); font-size: 12.5px; }
+.note-bar .primary { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+.note-bar button[disabled] { opacity: .5; cursor: default; }
+.today .acts { grid-column: 2; display:flex; flex-direction:column; gap: 8px; margin-top: 6px;
+               padding-top: 10px; border-top: 1px solid var(--grid); }
+.today .acts .act { margin-top: 0; }
+.today .src { grid-column: 2; font-size: 12px; color: var(--muted); }
 @media (max-width: 560px) {
   main { padding: 12px 12px 48px; }
   .act { grid-template-columns: 1fr; }
   .act details { grid-column: 1; }
+  .note { grid-column: 1; }
+  .today .acts, .today .src { grid-column: 1; }
   .row { grid-template-columns: 3em 1fr; }
 }
 </style>
@@ -459,15 +481,119 @@ const daysAsc = [...DATA.days].sort((a, b) => a.date < b.date ? -1 : 1);
 })();
 
 // ---------- 檔頭 ----------
-(function today() {
-  const t = DATA.today;
-  if (!t) return;
+// ---------- Intervals.icu 即時連線（只有加密版才有金鑰）----------
+const ICU = DATA.icu || null;
+const icuFetch = (path, opts = {}) => fetch("https://intervals.icu/api/v1" + path, {
+  ...opts,
+  headers: { Authorization: "Basic " + btoa("API_KEY:" + ICU.key), "Content-Type": "application/json" },
+});
+// 時間一律用台灣時間，不管手機設定在哪個時區
+const twNow = () => new Date(Date.now() + 8 * 3600e3);
+const twDate = () => twNow().toISOString().slice(0, 10);
+const twClock = () => twNow().toISOString().slice(11, 16);
+const addDays = (iso, n) => new Date(Date.parse(iso + "T00:00:00Z") + n * 864e5).toISOString().slice(0, 10);
+const weekdayOf = (iso) => WEEKDAY[(new Date(iso + "T00:00:00Z").getUTCDay() + 6) % 7];
+
+// <today-rules> 跟 transform.build_today 同一套判斷；門檻數字來自 DATA.today_rules，改規則要兩邊一起改
+function computeToday(rows, today, R, prevDayClasses) {
+  const W = new Map(rows.map((r) => [r.id, r]));
+  const hrvOf = (r) => (r && r.hrv != null ? r.hrv : r && r.hrvSDNN != null ? r.hrvSDNN : null);
+  const has = (r) => r && (hrvOf(r) != null || r.restingHR != null);
+  const sorted = [...W.keys()].sort();
+  const hrv7 = new Map(sorted.map((d, i) => {
+    const vals = sorted.slice(Math.max(0, i - 6), i + 1).map((x) => hrvOf(W.get(x))).filter((v) => v != null);
+    return [d, vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null];
+  }));
+  let dataDate = has(W.get(today)) ? today : null;
+  for (let b = 1; !dataDate && b < 4; b++) if (has(W.get(addDays(today, -b)))) dataDate = addDays(today, -b);
+  const w = dataDate ? W.get(dataDate) : null;
+  const signals = [], reasons = [];
+  const sgn = (v) => (v >= 0 ? "+" : "") + Math.round(v);
+
+  let rise = null;
+  if (w && w.restingHR != null) {
+    const prev = [1, 2, 3, 4, 5, 6, 7].map((i) => W.get(addDays(dataDate, -i))).filter((x) => x && x.restingHR != null).map((x) => x.restingHR);
+    if (prev.length) {
+      const avg = prev.reduce((a, b) => a + b, 0) / prev.length;
+      rise = w.restingHR - avg;
+      signals.push({ name: "靜止心率", value: String(w.restingHR), ref: `7 日 ${Math.round(avg)}，${sgn(rise)}`, note: "",
+        light: rise >= R.rhr_red ? "red" : rise >= R.rhr_yellow ? "yellow" : "green" });
+    } else signals.push({ name: "靜止心率", value: String(w.restingHR), ref: "7 日平均不足", light: "gray", note: "" });
+  } else signals.push({ name: "靜止心率", value: "--", ref: "沒有資料", light: "gray", note: "" });
+
+  const base = R.hrv_baseline || [];
+  let streak = 0;
+  if (w && hrvOf(w) != null && base.length) {
+    const floor = base[0];
+    while (true) { const x = W.get(addDays(dataDate, -streak)); if (x && hrvOf(x) != null && hrvOf(x) < floor) streak++; else break; }
+    signals.push({ name: "HRV", value: String(Math.round(hrvOf(w))), ref: base.length > 1 ? `基線 ${base[0]}–${base[1]}` : `基線 ${floor}`,
+      light: streak >= R.hrv_streak_days ? "red" : streak ? "yellow" : "green", note: streak >= 2 ? `連續 ${streak} 天偏低` : "" });
+  } else signals.push({ name: "HRV", value: "--", ref: "沒有資料", light: "gray", note: "" });
+
+  const subj = (R.subjective_fields || []).filter(([k]) => w && typeof w[k] === "number").map(([k, l]) => [l, w[k]]);
+  if (subj.length) {
+    const [wl, wv] = subj.reduce((a, b) => (b[1] > a[1] ? b : a));
+    let light = wv >= 4 ? "red" : wv >= R.subjective_bad ? "yellow" : "green";
+    const injury = (subj.find(([l]) => l === "傷病") || [0, 0])[1];
+    if (injury >= R.subjective_bad) light = "red";
+    signals.push({ name: "主觀", value: `${wl} ${wv}`, ref: subj.map(([l, v]) => `${l} ${v}`).join(" · "), light, note: "" });
+  } else signals.push({ name: "主觀", value: "未填", ref: "在 intervals.icu 記疲勞、痠痛就會納入", light: "gray", note: "" });
+  const subjLight = signals[signals.length - 1].light;
+  const illness = w && w.comments && (R.illness_words || []).some((x) => w.comments.includes(x));
+
+  const A = R.actions || {};
+  let light;
+  if (subjLight === "red") { light = "red"; reasons.push("主觀分數有 4 分或傷病"); }
+  else if (illness && streak) { light = "red"; reasons.push(`HRV 低於基線，且每日記錄提到身體不適 — ${A.illness || "停練"}`); }
+  else if (streak && rise != null && rise >= R.rhr_red) { light = "red"; reasons.push(`HRV 低於基線，同時靜止心率高 ${Math.round(rise)} 下 — ${A.rhr || "休息"}`); }
+  else if (streak >= R.hrv_streak_days) { light = "yellow"; reasons.push(`HRV 連續 ${streak} 天低於基線 — ${A.streak || "質量課降級"}`); }
+  else if (rise != null && rise >= R.rhr_red) { light = "yellow"; reasons.push(`靜止心率比平常高 ${Math.round(rise)} 下`); }
+  else if (illness) { light = "yellow"; reasons.push("每日記錄提到身體不適，質量課先降級"); }
+  else if (subjLight === "yellow") { light = "yellow"; reasons.push("主觀分數有 3 分"); }
+  else if (signals.every((sg) => sg.light === "gray")) { light = "gray"; reasons.push("沒有晨間資料"); }
+  else {
+    light = "green";
+    if (streak) reasons.push((prevDayClasses || []).some((c) => (R.quality_classes || []).includes(c))
+      ? `HRV 單日偏低，但前一天有質量課 — ${A.prev_quality || "正常"}` : "HRV 單日偏低，明天再看一次");
+  }
+
+  const session = (R.sessions || {})[today] || null;
+  const stype = session && session.type;
+  const lab = (R.type_label || {})[stype] || stype || "";
+  const kmText = session && session.km ? ` ${+session.km}km` : "";
+  const desc = session && session.desc ? ` — ${session.desc}` : "";
+  const quality = (R.quality_types || []).includes(stype);
+  let headline, prescription;
+  if (light === "red") { headline = "休息"; prescription = "今天休息" + (stype && stype !== "OFF" ? `，課表的${lab}課往後推` : ""); }
+  else if (light === "yellow") {
+    headline = "降級";
+    prescription = quality ? `${lab}課改成 E 40 分（${R.e_pace}），或整堂往後推一天`
+      : stype === "OFF" ? "照課表休息"
+      : stype ? `照課表${lab}${kmText}，強度壓在 E（${R.e_pace}）`
+      : `今天課表沒排；要練就只做 E（${R.e_pace}），質量課往後推`;
+  } else if (light === "green" && stype === "OFF") { headline = "休息日"; prescription = (session && session.desc) || "照課表休息";
+  } else if (light === "green") { headline = "照課表練"; prescription = stype ? `${lab}${kmText}${desc}` : "今天課表沒排，照你的計畫練"; }
+  else { headline = "沒有資料"; prescription = (stype ? `${lab}${kmText}${desc}` : "今天課表沒排") + "（沒有晨間資料可以判斷）"; }
+
+  let weekNote = null;
+  if (base.length && w && hrv7.get(dataDate) != null && hrv7.get(dataDate) < base[0]) {
+    let s7 = 0;
+    while (true) { const v = hrv7.get(addDays(dataDate, -s7)); if (v != null && v < base[0]) s7++; else break; }
+    if (s7 >= R.hrv_streak7_days) weekNote = `HRV 7 日平均 ${hrv7.get(dataDate).toFixed(1)} 已連續 ${s7} 天低於基線 ${base[0]} — ${A.streak7 || "考慮減量"}`;
+  }
+  return { date: today, weekday: weekdayOf(today), data_date: dataDate, light, headline, prescription,
+           reasons, signals, session, week_note: weekNote };
+}
+// </today-rules>
+
+function renderToday(t, src, acts) {
   const box = document.getElementById("today");
+  box.replaceChildren();
   const LAMP = { green: ["✓", "照課表"], yellow: ["!", "降級"], red: ["✕", "休息"], gray: ["?", "沒資料"] };
   const [icon, word] = LAMP[t.light] || LAMP.gray;
   const stale = t.data_date && t.data_date !== t.date ? `（今天的晨間資料還沒同步，先用 ${md(t.data_date)} 的）` : "";
   const sess = t.session;
-  box.append(
+  box.append(...[
     el("div", { class: "lamp" }, el("i", { class: `light-${t.light}`, "aria-hidden": "true", text: icon }), el("span", { text: word })),
     el("div", {},
       el("div", { class: "when", text: `今日狀態 · ${md(t.date)} ${t.weekday}${stale}` }),
@@ -481,9 +607,48 @@ const daysAsc = [...DATA.days].sort((a, b) => a.date < b.date ? -1 : 1);
     (t.reasons.length || t.week_note) ? el("div", { class: "why" },
       ...t.reasons.map(r => el("div", {}, el("span", { class: "muted", text: "·" }), el("span", { text: r }))),
       t.week_note ? el("div", {}, el("span", { class: "muted", text: "·" }), el("span", { text: `本週：${t.week_note}` })) : null) : null,
-  );
+    acts && acts.length ? el("div", { class: "acts" }, ...acts) : null,
+    el("div", { class: "src", text: src }),
+  ].filter(Boolean));
   box.hidden = false;
-})();
+}
+
+async function initToday() {
+  if (!DATA.today) return;
+  const built = document.getElementById("gen-at").textContent;
+  const todayIso = twDate();
+  const fromPage = DATA.today.date === todayIso;
+  const pageActs = (DATA.days.find((d) => d.date === todayIso) || { activities: [] }).activities;
+  const actBlocks = (list) => list.map((a) => activityBlock(a, { compact: true }));
+  renderToday(DATA.today, fromPage ? `資料：網頁產生時（${built}，台灣時間）` : `資料：${built} 產生的網頁，${ICU ? "正在抓今天的資料…" : "今天的資料要等網頁重新產生"}`,
+    fromPage ? actBlocks(pageActs) : []);
+  if (!ICU || !DATA.today_rules) return;
+  try {
+    const q = `oldest=${addDays(todayIso, -21)}&newest=${todayIso}`;
+    const [wr, ar] = await Promise.all([
+      icuFetch(`/athlete/${encodeURIComponent(ICU.athlete)}/wellness?${q}`),
+      icuFetch(`/athlete/${encodeURIComponent(ICU.athlete)}/activities?oldest=${todayIso}&newest=${todayIso}` +
+               "&fields=id,start_date_local,type,name,distance,moving_time,average_heartrate,max_heartrate,icu_training_load,description"),
+    ]);
+    if (!wr.ok || !ar.ok) throw new Error(`HTTP ${wr.status}/${ar.status}`);
+    const rows = await wr.json(), raw = await ar.json();
+    const prevDay = DATA.days.find((d) => d.date === addDays(todayIso, -1));
+    const t = computeToday(rows, todayIso, DATA.today_rules, prevDay ? prevDay.activities.map((a) => a.cls) : []);
+    // 今天的訓練：網頁產生時已分類的用網頁的，剛跑完、網頁還沒有的用即時抓的基本資料
+    const runTypes = DATA.today_rules.run_types || [];
+    const acts = raw.map((r) => pageActs.find((a) => a.id === r.id) || {
+      id: r.id, date: todayIso, name: r.name || "", sport: r.type, is_run: runTypes.includes(r.type),
+      km: (r.distance || 0) / 1000, seconds: r.moving_time || 0,
+      pace_s: r.distance && r.moving_time ? r.moving_time / (r.distance / 1000) : null,
+      hr_avg: r.average_heartrate, hr_max: r.max_heartrate, load: r.icu_training_load,
+      description: (r.description || "").trim() || null, cls: runTypes.includes(r.type) ? "RUN" : "XT",
+      work_laps: [], flags: [],
+    });
+    renderToday(t, `資料：即時（${md(todayIso)} ${twClock()} 從 Intervals.icu 抓，台灣時間）`, actBlocks(acts));
+  } catch (e) {
+    renderToday(DATA.today, `資料：網頁產生時（${built}）· 即時資料抓不到（${e.message}）`, fromPage ? actBlocks(pageActs) : []);
+  }
+}
 
 (function header() {
   document.getElementById("range").textContent = `${DATA.date_from} ～ ${DATA.date_to}`;
@@ -555,7 +720,7 @@ const saveState = () => { try { localStorage.setItem("filters", JSON.stringify(s
       el("td", { class: "num", text: `${md(w.start)}–${md(w.end)}` }),
       kmCell,
       el("td", { class: "strip" }, bar, el("div", { class: "txt", text: txt }),
-        q ? el("div", { class: "txt", title: "工作段實際落在該配速的距離，quality_caps 用這個算", text: `質量段 ${q} km` }) : null),
+        q ? el("div", { class: "txt", title: "主課表段實際落在該配速的距離，quality_caps 用這個算", text: `質量段 ${q} km` }) : null),
       el("td", { class: "num", text: w.in_progress ? "進行中" : String(w.load) }),
       el("td", { class: "num", text: (w.ctl_start == null && w.ctl_end == null) ? "--" : `${n0(w.ctl_start)}→${n0(w.ctl_end)}` }),
       el("td", { class: "notes" }, plan, planNotes ? el("div", { class: "muted", text: planNotes }) : null),
@@ -826,13 +991,69 @@ function dayCard(d) {
   }
   for (const a of d.activities) for (const f of a.flags)
     flags.append(el("div", { class: "flag serious" }, el("span", { class: "ico", text: "⚠" }), el("span", { text: f })));
-  for (const a of d.activities) if (a.description)
-    flags.append(el("div", { class: "flag info" }, el("span", { class: "ico", text: "✎" }), el("span", { text: a.description })));
   if (flags.children.length) card.append(flags);
   return card;
 }
-function activityBlock(a) {
-  const badge = el("span", { class: "badge" }, el("i", { style: `background:${color(a.cls)}` }), label(a.cls), el("span", { class: "cls", text: a.is_run ? a.cls : a.sport }));
+// 課後筆記：寫進 Intervals.icu 那筆活動的「描述」欄位，文字摘要的「筆記」也會讀到。
+// 網頁要到下次重新產生才會帶到新筆記，在那之前先記在這台裝置上顯示。
+const NOTE_MAX = 150;
+const noteStore = {
+  all() { try { return JSON.parse(localStorage.getItem("notes") || "{}"); } catch (_) { return {}; } },
+  get(id) { return this.all()[id]; },
+  set(id, text) { const m = this.all(); m[id] = text; try { localStorage.setItem("notes", JSON.stringify(m)); } catch (_) {} },
+  drop(id) { const m = this.all(); delete m[id]; try { localStorage.setItem("notes", JSON.stringify(m)); } catch (_) {} },
+};
+function noteBlock(a) {
+  const wrap = el("div", { class: "note" });
+  const current = () => {
+    const local = noteStore.get(a.id);
+    if (local !== undefined && local === (a.description || "")) { noteStore.drop(a.id); return local; }
+    return local !== undefined ? local : (a.description || "");
+  };
+  const view = () => {
+    wrap.replaceChildren();
+    const text = current();
+    if (text) wrap.append(el("div", { class: "note-text" }, el("span", { class: "ico", text: "✎" }), el("span", { text })));
+    if (ICU) wrap.append(el("button", { type: "button", class: "note-btn", text: text ? "編輯筆記" : "✎ 寫課後筆記", onclick: edit }));
+  };
+  const edit = () => {
+    wrap.replaceChildren();
+    const ta = el("textarea", { rows: "3", maxlength: String(NOTE_MAX), placeholder: `今天練得怎樣？最多 ${NOTE_MAX} 字`, "aria-label": "課後筆記" });
+    ta.value = current();
+    const count = el("span", { class: "count" }), err = el("span", { class: "err" });
+    const save = el("button", { type: "button", class: "primary", text: "儲存" });
+    const upd = () => {
+      const n = [...ta.value].length;
+      count.textContent = `${n} / ${NOTE_MAX}`;
+      count.classList.toggle("over", n > NOTE_MAX);
+      save.disabled = n > NOTE_MAX;
+    };
+    ta.addEventListener("input", upd);
+    save.addEventListener("click", async () => {
+      const text = ta.value.trim();
+      save.disabled = true; save.textContent = "儲存中…"; err.textContent = "";
+      try {
+        const r = await icuFetch(`/activity/${encodeURIComponent(a.id)}`, { method: "PUT", body: JSON.stringify({ description: text }) });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        noteStore.set(a.id, text);
+        view();
+      } catch (e) {
+        err.textContent = `沒存成功（${e.message}），再按一次`;
+        save.disabled = false; save.textContent = "儲存";
+      }
+    });
+    wrap.append(ta, el("div", { class: "note-bar" }, count, err,
+      el("button", { type: "button", text: "取消", onclick: view }), save));
+    upd(); ta.focus();
+  };
+  view();
+  return wrap;
+}
+
+function activityBlock(a, opts = {}) {
+  const badge = a.cls === "RUN"        // 剛跑完、網頁還沒分類的跑步
+    ? el("span", { class: "badge" }, el("i", { style: "background:var(--c0)" }), "跑步", el("span", { class: "cls", text: "未分類" }))
+    : el("span", { class: "badge" }, el("i", { style: `background:${color(a.cls)}` }), label(a.cls), el("span", { class: "cls", text: a.is_run ? a.cls : a.sport }));
   const stats = a.is_run
     ? el("span", { class: "stats" }, el("b", { text: `${n1(a.km)} km` }), ` · `, el("b", { text: `${pace(a.pace_s)}/km` }), ` · 均心 ${a.hr_avg ?? "--"} · 最高 ${a.hr_max ?? "--"} · 負荷 ${a.load ?? "--"}`)
     : el("span", { class: "stats" }, el("b", { text: a.name || a.sport }), ` · ${Math.round(a.seconds / 60)} 分 · 均心 ${a.hr_avg ?? "--"} · 最高 ${a.hr_max ?? "--"} · 負荷 ${a.load ?? "--"}`);
@@ -841,12 +1062,14 @@ function activityBlock(a) {
     const laps = el("table", { class: "laps" }, ...a.work_laps.map((l, i) => el("tr", {},
       el("td", { text: String(i + 1) }), el("td", { text: clock(l.seconds) }), el("td", { text: `${(l.meters / 1000).toFixed(2)} km` }),
       el("td", { text: `${pace(l.pace_s)}/km` }), el("td", { text: l.hr_avg ? (l.hr_max && l.hr_max !== l.hr_avg ? `HR ${l.hr_avg}→${l.hr_max}` : `HR ${l.hr_avg}`) : "HR --" }))));
-    block.append(el("details", { ...(state.openLaps ? { open: "" } : {}) }, el("summary", { text: `工作段 ${a.work_laps.length} 趟` }), laps));
+    block.append(el("details", { ...(state.openLaps ? { open: "" } : {}) }, el("summary", { text: `主課表段 ${a.work_laps.length} 趟` }), laps));
   }
+  if (ICU || a.description || noteStore.get(a.id) !== undefined) block.append(noteBlock(a));
   return block;
 }
 renderFilters();
 renderDays();
+initToday();      // 放最後：要用到上面宣告的 state、noteStore、activityBlock
 </script>
 </body>
 </html>
