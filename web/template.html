@@ -243,12 +243,50 @@ footer { margin-top: 40px; font-size: 12px; color: var(--muted); text-align:cent
                padding-top: 10px; border-top: 1px solid var(--grid); }
 .today .acts .act { margin-top: 0; }
 .today .src { grid-column: 2; font-size: 12px; color: var(--muted); }
+/* 明日課表（今日狀態卡片裡） */
+.today .tmr { grid-column: 2; display:flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 14px;
+              margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--grid); }
+.today .tmr .k { font-weight: 650; }
+.today .tmr .d { color: var(--muted); font-variant-numeric: tabular-nums; }
+.today .tmr .t { color: var(--ink-2); flex: 1 1 260px; }
+
+/* 接下來的課表 */
+.sched { display:flex; flex-direction:column; gap: 10px; }
+.wk { padding: 0; overflow: hidden; }
+.wk > summary { list-style: none; cursor: pointer; padding: 12px 14px; display:flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.wk > summary::-webkit-details-marker { display:none; }
+.wk > summary::before { content: "▸"; color: var(--muted); width: 10px; }
+.wk[open] > summary::before { content: "▾"; }
+.wk .wn { font-weight: 650; }
+.wk .wd { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.wk .wkm { margin-left: auto; font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.wk .wnote { padding: 0 14px 8px 32px; font-size: 13px; color: var(--ink-2); }
+.sd { display:grid; grid-template-columns: 76px 96px 52px 1fr; gap: 2px 10px; align-items: baseline;
+      padding: 7px 14px 7px 32px; border-top: 1px solid var(--grid); font-size: 13.5px; }
+.sd .dt { font-variant-numeric: tabular-nums; color: var(--ink-2); white-space: nowrap; }
+.sd .km { font-variant-numeric: tabular-nums; color: var(--ink-2); text-align: right; white-space: nowrap; }
+.sd .ds { color: var(--ink-2); }
+.sd.off .ds, .sd.none .ds { color: var(--muted); }
+.sd.now { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.sd.race { background: color-mix(in srgb, var(--warn) 12%, transparent); }
+.sd.race .ds { color: var(--ink); font-weight: 600; }
+.tag { display:inline-block; font-size: 11px; line-height: 1.5; padding: 0 6px; border-radius: 999px; margin-left: 4px;
+       background: var(--ink); color: var(--surface); vertical-align: 1px; }
+.later { font-size: 13px; color: var(--ink-2); }
+.later > summary { cursor: pointer; color: var(--muted); padding: 4px 0; }
+.later table { border-collapse: collapse; width: 100%; margin-top: 4px; }
+.later td { padding: 5px 8px; border-top: 1px solid var(--grid); vertical-align: top; }
+.later td.n { white-space: nowrap; font-weight: 600; color: var(--ink); }
+.later td.dt, .later td.km { white-space: nowrap; font-variant-numeric: tabular-nums; }
 @media (max-width: 560px) {
   main { padding: 12px 12px 48px; }
   .act { grid-template-columns: 1fr; }
   .act details { grid-column: 1; }
   .note { grid-column: 1; }
-  .today .acts, .today .src { grid-column: 1; }
+  .today .acts, .today .src, .today .tmr { grid-column: 1; }
+  .sd { grid-template-columns: 70px 1fr auto; padding-left: 14px; }
+  .sd .ds { grid-column: 1 / -1; }
+  .wk .wnote { padding-left: 14px; }
   .row { grid-template-columns: 3em 1fr; }
 }
 </style>
@@ -286,6 +324,9 @@ footer { margin-top: 40px; font-size: 12px; color: var(--muted); text-align:cent
   <div class="card today" id="today" hidden></div>
   <div class="hero" id="hero"></div>
   <div class="paces" id="paces"></div>
+
+  <h2>接下來的課表 <small>依 plan.json</small></h2>
+  <div class="sched" id="schedule"></div>
 
   <h2>週統計 <small>點一列可篩選下面的每日明細</small></h2>
   <div class="legend" id="class-legend"></div>
@@ -574,6 +615,12 @@ function computeToday(rows, today, R, prevDayClasses) {
   } else if (light === "green" && stype === "OFF") { headline = "休息日"; prescription = (session && session.desc) || "照課表休息";
   } else if (light === "green") { headline = "照課表練"; prescription = stype ? `${lab}${kmText}${desc}` : "今天課表沒排，照你的計畫練"; }
   else { headline = "沒有資料"; prescription = (stype ? `${lab}${kmText}${desc}` : "今天課表沒排") + "（沒有晨間資料可以判斷）"; }
+  // 比賽不能降級也不能延期：處方照課表，燈號和理由留著
+  const race = (R.races || {})[today];
+  if (race) {
+    headline = "比賽日"; prescription = (session && session.desc) || race;
+    reasons.splice(0, reasons.length, ...reasons.map((r) => r.split(" — ")[0]));   // 「降級、往後推」不適用比賽
+  }
 
   let weekNote = null;
   if (base.length && w && hrv7.get(dataDate) != null && hrv7.get(dataDate) < base[0]) {
@@ -585,6 +632,34 @@ function computeToday(rows, today, R, prevDayClasses) {
            reasons, signals, session, week_note: weekNote };
 }
 // </today-rules>
+
+// 一天的課表：顏色點 + 課別 + 公里數 + 說明（跟 transform.describe_session 同一個寫法）
+function sessionParts(s, race) {
+  if (race) return { cls: "TEST", name: "比賽", km: s && s.km ? `${+s.km}km` : "", desc: s && s.desc ? s.desc : race };
+  if (!s) return { cls: null, name: "未排", km: "", desc: "課表沒排" };
+  if (s.type === "OFF") {
+    // 標籤已經寫「休息」，說明開頭的「休息 / 」「休息（…）」就不重複：「休息 / 網球（最多一晚）」→「網球（最多一晚）」
+    let d = (s.desc || "").replace(/^休息\s*[\/／、，,]?\s*/, "");
+    if (/^（.*）$/.test(d)) d = d.slice(1, -1);
+    return { cls: "OFF", name: "休息", km: "", desc: d };
+  }
+  return { cls: s.type, name: label(s.type), km: s.km ? `${+s.km}km` : "", desc: s.desc || "" };
+}
+const sessionBadge = (p) => el("span", { class: "badge" },
+  el("i", { style: `background:${p.cls && p.cls !== "OFF" ? color(p.cls) : "var(--c0)"}` }), p.name);
+
+function tomorrowRow() {
+  const S = DATA.schedule;
+  if (!S) return null;
+  const d = addDays(twDate(), 1);
+  const p = sessionParts(S.sessions[d], S.races[d]);
+  return el("div", { class: "tmr" },
+    el("span", { class: "k", text: "明日課表" }),
+    el("span", { class: "d", text: `${md(d)} ${weekdayOf(d)}` }),
+    sessionBadge(p),
+    p.km ? el("b", { text: p.km }) : null,
+    el("span", { class: "t", text: p.desc }));
+}
 
 function renderToday(t, src, acts) {
   const box = document.getElementById("today");
@@ -607,6 +682,7 @@ function renderToday(t, src, acts) {
     (t.reasons.length || t.week_note) ? el("div", { class: "why" },
       ...t.reasons.map(r => el("div", {}, el("span", { class: "muted", text: "·" }), el("span", { text: r }))),
       t.week_note ? el("div", {}, el("span", { class: "muted", text: "·" }), el("span", { text: `本週：${t.week_note}` })) : null) : null,
+    tomorrowRow(),
     acts && acts.length ? el("div", { class: "acts" }, ...acts) : null,
     el("div", { class: "src", text: src }),
   ].filter(Boolean));
@@ -689,6 +765,59 @@ async function initToday() {
   }
   if (DATA.vdot && DATA.vdot.current) paces.append(el("span", { class: "muted", text: `VDOT ${DATA.vdot.current}` }));
 })();
+
+// ---------- 接下來的課表 ----------
+// 依打開網頁當下的台灣日期，從今天往後列到 plan.json 排到的最後一天；更後面只有週期大綱
+function renderSchedule() {
+  const S = DATA.schedule, box = document.getElementById("schedule");
+  if (!S) { box.append(el("div", { class: "card empty", text: "沒有課表資料" })); return; }
+  const today = twDate(), tomorrow = addDays(today, 1);
+  const planned = Object.keys(S.sessions).filter((d) => d >= today).sort();
+  const last = planned[planned.length - 1];
+  if (!last) {
+    box.append(el("div", { class: "card empty", text: "今天之後還沒排課，到 plan.json 的 sessions 加上去就會出現在這裡" }));
+  }
+  let opened = 0;
+  for (const w of S.weeks) {
+    if (!last || w.end < today || w.start > last) continue;
+    const weekKm = Object.entries(S.sessions)
+      .filter(([d]) => d >= w.start && d <= w.end).reduce((sum, [, v]) => sum + (+v.km || 0), 0);
+    const details = el("details", { class: "card wk", ...(opened < 2 ? { open: "" } : {}) });
+    opened++;
+    details.append(el("summary", {},
+      el("span", { class: "wn", text: `W${w.n}` }),
+      el("span", { class: "wd", text: `${md(w.start)}–${md(w.end)}` }),
+      el("span", { text: `${w.phase}期` }),
+      el("span", { class: "wkm", text: [`課表 ${+weekKm.toFixed(1)}km`, w.target_km ? `目標 ${w.target_km}km` : null,
+        w.long_run_min ? `長跑 ${w.long_run_min} 分` : null].filter(Boolean).join(" · ") })));
+    if (w.note) details.append(el("div", { class: "wnote", text: w.note }));
+    for (let d = w.start < today ? today : w.start; d <= w.end; d = addDays(d, 1)) {
+      const race = S.races[d];
+      const p = sessionParts(S.sessions[d], race);
+      const tag = d === today ? "今天" : d === tomorrow ? "明天" : null;
+      const cls = ["sd", d === today || d === tomorrow ? "now" : "", race ? "race" : "",
+                   p.cls === "OFF" ? "off" : "", p.cls ? "" : "none"].filter(Boolean).join(" ");
+      details.append(el("div", { class: cls },
+        el("span", { class: "dt" }, `${md(d)} ${weekdayOf(d)}`, tag ? el("span", { class: "tag", text: tag }) : null),
+        sessionBadge(p),
+        el("span", { class: "km", text: p.km }),
+        el("span", { class: "ds", text: p.desc })));
+    }
+    box.append(details);
+  }
+  const later = S.weeks.filter((w) => !last || w.start > last);
+  if (later.length) {
+    const rows = later.map((w) => el("tr", {},
+      el("td", { class: "n", text: `W${w.n}` }),
+      el("td", { class: "dt", text: `${md(w.start)}–${md(w.end)}` }),
+      el("td", { text: `${w.phase}期` }),
+      el("td", { class: "km", text: w.target_km ? `${w.target_km}km` : "" }),
+      el("td", { text: [w.key, w.note].filter(Boolean).join(" · ") })));
+    box.append(el("details", { class: "later" },
+      el("summary", { text: `之後的週期大綱（${later.length} 週，還沒排每天的課）` }),
+      el("table", {}, el("tbody", {}, ...rows))));
+  }
+}
 
 // ---------- 週統計 ----------
 const state = { week: "all", hideRest: false, flagsOnly: false, openLaps: false };
@@ -1069,6 +1198,7 @@ function activityBlock(a, opts = {}) {
 }
 renderFilters();
 renderDays();
+renderSchedule();
 initToday();      // 放最後：要用到上面宣告的 state、noteStore、activityBlock
 </script>
 </body>

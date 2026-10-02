@@ -10,6 +10,7 @@ import datetime as dt
 import json
 import re
 import statistics
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -121,8 +122,23 @@ def mean(values):
 
 def load_plan(path="plan.json") -> dict:
     text = Path(path).read_text(encoding="utf-8-sig")
+    duplicates = []
+
+    def keep_last(pairs):
+        # JSON 允許同一個鍵出現兩次，後面的會悄悄蓋掉前面的——
+        # 同一天排了兩次課，前一筆就消失了，所以要講出來
+        seen = set()
+        for key, _ in pairs:
+            if key in seen:
+                duplicates.append(key)
+            seen.add(key)
+        return dict(pairs)
+
     try:
-        return json.loads(text)
+        plan = json.loads(text, object_pairs_hook=keep_last)
+        for key in duplicates:
+            print(f"[warn] {path} 裡「{key}」出現不只一次，只會用最後一筆", file=sys.stderr)
+        return plan
     except json.JSONDecodeError as exc:
         # plan.json 是手動編輯的，最常見的錯是少逗號或多逗號，直接指出第幾行
         line = text.splitlines()[exc.lineno - 1] if exc.lineno <= len(text.splitlines()) else ""
@@ -323,6 +339,7 @@ class Digest:
     trends: Trends
     today: Today | None = None
     today_rules: dict | None = None   # 網頁打開時即時重算「今日狀態」用，數字跟 build_today 同一份
+    schedule: dict | None = None      # 未來課表：網頁的「明日課表」「接下來的課表」用
 
 
 EMPTY_WELLNESS = Wellness("", None, None, None, None, None, None, None, None, None, None, None)
@@ -1079,6 +1096,47 @@ def _hrv_action(plan, needle):
     return ""
 
 
+def _races(plan):
+    return {r["date"]: r.get("name") or "比賽" for r in plan.get("races", []) if r.get("date")}
+
+
+def describe_session(session, race=None):
+    """一天的課表寫成一行字：「輕鬆跑 5km — E 5km（可休息）…」。"""
+    if race:
+        return f"比賽：{race}" + (f" — {session['desc']}" if session and session.get("desc") else "")
+    if not session:
+        return "課表沒排"
+    stype = session.get("type")
+    desc = session.get("desc") or ""
+    if stype == "OFF":
+        return desc if desc else "休息"
+    km = f" {session['km']:g}km" if session.get("km") else ""
+    return f"{TYPE_LABEL.get(stype, stype or '')}{km}" + (f" — {desc}" if desc else "")
+
+
+def build_schedule(plan, today):
+    """網頁的「明日課表」與「接下來的課表」。
+
+    今天、明天是瀏覽器依打開當下的台灣日期決定的（網頁可能是前一晚產生的）。
+    """
+    # 從「前一天所在那週的週一」開始：週的課表合計要算整週，網頁晚一天更新也不會少
+    yesterday = today - dt.timedelta(days=1)
+    start = (yesterday - dt.timedelta(days=yesterday.weekday())).isoformat()
+    sessions = {d: v for d, v in sorted((plan.get("sessions") or {}).items()) if d >= start}
+    weeks = []
+    for w in plan.get("weeks", []):
+        week_start = to_date(w["start"])
+        week_end = week_start + dt.timedelta(days=6)
+        if week_end.isoformat() < start:
+            continue
+        weeks.append({
+            "n": w.get("n"), "start": week_start.isoformat(), "end": week_end.isoformat(),
+            "phase": w.get("phase") or "", "target_km": w.get("target_km"),
+            "long_run_min": w.get("long_run_min"), "note": w.get("note"), "key": w.get("key"),
+        })
+    return {"sessions": sessions, "weeks": weeks, "races": _races(plan)}
+
+
 def _e_pace(plan):
     e_spec = (plan.get("paces") or {}).get("E") or {}
     return e_spec.get("target") or "-".join(x for x in (e_spec.get("min"), e_spec.get("max")) if x)
@@ -1114,6 +1172,7 @@ def build_today_rules(plan, today):
             "rhr": _hrv_action(plan, "靜止心率升高"),
             "illness": _hrv_action(plan, "喉嚨痛"),
         },
+        "races": _races(plan),
         "sessions": {d: v for d, v in sessions.items() if lo <= d <= hi},
     }
 
@@ -1252,6 +1311,13 @@ def build_today(plan, days, wellness, today):
         headline = "沒有資料"
         prescription = (f"{label}{km_text}{desc}" if stype else "今天課表沒排") + "（沒有晨間資料可以判斷）"
 
+    # 比賽不能降級也不能延期：處方照課表，燈號和理由留著給你自己決定配速策略
+    race = _races(plan).get(key)
+    if race:
+        headline = "比賽日"
+        prescription = (session or {}).get("desc") or race
+        reasons = [r.split(" — ")[0] for r in reasons]      # 「降級、往後推」不適用比賽，只留觀察
+
     week_note = None
     if baseline and well and well.hrv7 is not None and well.hrv7 < baseline[0]:
         streak7 = 0
@@ -1351,6 +1417,7 @@ def build(plan, raw_activities, intervals, raw_wellness, date_from, date_to,
 
     today_status = build_today(plan, days, wellness, today)
     today_rules = build_today_rules(plan, today)
+    schedule = build_schedule(plan, today)
 
     return Digest(
         date_from=date_from.isoformat(),
@@ -1366,4 +1433,5 @@ def build(plan, raw_activities, intervals, raw_wellness, date_from, date_to,
         trends=trends,
         today=today_status,
         today_rules=today_rules,
+        schedule=schedule,
     )

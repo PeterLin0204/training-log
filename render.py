@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import unicodedata
 
-from transform import CLASS_ORDER, Digest, fmt_clock, fmt_hm, fmt_pace
+import datetime as dt
+
+from transform import CLASS_ORDER, WEEKDAY_ZH, Digest, describe_session, fmt_clock, fmt_hm, fmt_pace
 
 INDENT = " " * 6
 
@@ -86,6 +88,11 @@ def render_header(d: Digest) -> list[str]:
             lines.append(f"　　　{r}")
         if t.week_note:
             lines.append(f"　　　本週：{t.week_note}")
+        if d.schedule:
+            tmr = dt.date.fromisoformat(t.date) + dt.timedelta(days=1)
+            key = tmr.isoformat()
+            text = describe_session(d.schedule["sessions"].get(key), d.schedule["races"].get(key))
+            lines.append(f"明日　{md(key)} {WEEKDAY_ZH[tmr.weekday()]} {text}")
 
     paces = []
     for key in ("E", "M", "T", "I", "R"):
