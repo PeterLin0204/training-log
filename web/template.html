@@ -134,7 +134,17 @@ td.notes { white-space: normal; min-width: 220px; font-size: 13px; color: var(--
 /* ---------- 圖表 ---------- */
 .charts { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 @media (max-width: 700px) { .charts { grid-template-columns: 1fr; } }
-.chart { padding: 12px 14px 10px; }
+.chart { padding: 12px 14px 10px; position: relative; }
+.legend .has-info { cursor: help; outline: none; border-radius: 3px; }
+.legend .has-info .nm { border-bottom: 1px dotted var(--muted); }
+.legend .has-info .qi { color: var(--muted); font-size: 11px; margin-left: 3px; }
+.legend .has-info:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.info-tip { position: absolute; z-index: 6; width: max-content; max-width: min(330px, calc(100% - 16px));
+            background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 11px;
+            font-size: 12.5px; line-height: 1.55; color: var(--ink-2); box-shadow: 0 6px 20px rgba(0,0,0,.16); }
+.info-tip b { color: var(--ink); display: block; margin-bottom: 3px; }
+.info-tip .f { color: var(--ink); font-variant-numeric: tabular-nums; margin: 2px 0; }
+.info-tip .foot { color: var(--muted); margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--grid); }
 .chart .head { display:flex; justify-content:space-between; align-items:baseline; gap: 8px; }
 .chart .title { font-weight: 600; font-size: 14px; }
 .chart .title small { color: var(--muted); font-weight: 400; margin-left: 6px; }
@@ -260,9 +270,10 @@ footer { margin-top: 40px; font-size: 12px; color: var(--muted); text-align:cent
 .wk .wn { font-weight: 650; }
 .wk .wd { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
 .wk .wkm { margin-left: auto; font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
-.wk .wnote { padding: 0 14px 8px 32px; font-size: 13px; color: var(--ink-2); }
-.sd { display:grid; grid-template-columns: 76px 96px 52px 1fr; gap: 2px 10px; align-items: baseline;
-      padding: 7px 14px 7px 32px; border-top: 1px solid var(--grid); font-size: 13.5px; }
+.wk .wnote { padding: 0 14px 8px 64px; font-size: 13px; color: var(--ink-2); }
+.sd { display:grid; grid-template-columns: 40px 64px 96px 52px 1fr; gap: 2px 10px; align-items: baseline;
+      padding: 7px 14px; border-top: 1px solid var(--grid); font-size: 13.5px; }
+.sd .tg { text-align: center; }
 .sd .dt { font-variant-numeric: tabular-nums; color: var(--ink-2); white-space: nowrap; }
 .sd .km { font-variant-numeric: tabular-nums; color: var(--ink-2); text-align: right; white-space: nowrap; }
 .sd .ds { color: var(--ink-2); }
@@ -270,8 +281,8 @@ footer { margin-top: 40px; font-size: 12px; color: var(--muted); text-align:cent
 .sd.now { background: color-mix(in srgb, var(--accent) 7%, transparent); }
 .sd.race { background: color-mix(in srgb, var(--warn) 12%, transparent); }
 .sd.race .ds { color: var(--ink); font-weight: 600; }
-.tag { display:inline-block; font-size: 11px; line-height: 1.5; padding: 0 6px; border-radius: 999px; margin-left: 4px;
-       background: var(--ink); color: var(--surface); vertical-align: 1px; }
+.tag { display:inline-block; font-size: 11px; line-height: 1.6; padding: 0 6px; border-radius: 999px;
+       background: var(--ink); color: var(--surface); white-space: nowrap; }
 .later { font-size: 13px; color: var(--ink-2); }
 .later > summary { cursor: pointer; color: var(--muted); padding: 4px 0; }
 .later table { border-collapse: collapse; width: 100%; margin-top: 4px; }
@@ -284,8 +295,8 @@ footer { margin-top: 40px; font-size: 12px; color: var(--muted); text-align:cent
   .act details { grid-column: 1; }
   .note { grid-column: 1; }
   .today .acts, .today .src, .today .tmr { grid-column: 1; }
-  .sd { grid-template-columns: 70px 1fr auto; padding-left: 14px; }
-  .sd .ds { grid-column: 1 / -1; }
+  .sd { grid-template-columns: 40px 64px 1fr auto; padding-left: 10px; padding-right: 10px; }
+  .sd .ds { grid-column: 2 / -1; }
   .wk .wnote { padding-left: 14px; }
   .row { grid-template-columns: 3em 1fr; }
 }
@@ -535,6 +546,39 @@ const twClock = () => twNow().toISOString().slice(11, 16);
 const addDays = (iso, n) => new Date(Date.parse(iso + "T00:00:00Z") + n * 864e5).toISOString().slice(0, 10);
 const weekdayOf = (iso) => WEEKDAY[(new Date(iso + "T00:00:00Z").getUTCDay() + 6) % 7];
 
+// <classify-rules> 跟 transform.parse_laps / infer_class 同一套；門檻與配速分帶來自 DATA.today_rules.classify
+function workLaps(raw, C) {
+  const out = [];
+  for (const iv of raw || []) {
+    const m = iv.distance, sec = iv.moving_time || iv.elapsed_time;
+    if (!m || !sec || m < C.min_lap_m) continue;
+    const pace = sec / (m / 1000);
+    if (C.e_limit && pace >= C.e_limit) continue;
+    out.push({ seconds: sec, meters: m, pace_s: pace,
+               hr_avg: iv.average_heartrate == null ? null : iv.average_heartrate,
+               hr_max: iv.max_heartrate == null ? null : iv.max_heartrate });
+  }
+  return out;
+}
+function bandOf(pace, bands) {
+  if (!pace) return null;
+  for (const [name, upper] of bands) if (upper == null || pace <= upper) return name;
+  return bands.length ? bands[bands.length - 1][0] : null;
+}
+function classifyRun(act, laps, C) {
+  const total = act.distance || 0, isLong = (act.moving_time || 0) >= C.long_min * 60;
+  const Q = C.quality_bands, q = {};
+  for (const l of laps) { const b = bandOf(l.pace_s, C.bands); if (Q.includes(b)) q[b] = (q[b] || 0) + l.meters; }
+  const qm = Object.values(q).reduce((a, b) => a + b, 0);
+  const dom = Object.keys(q).sort((a, b) => q[b] - q[a] || Q.indexOf(a) - Q.indexOf(b))[0] || null;
+  if (isLong) return dom && qm >= C.long_share * total ? dom : "L";
+  if (dom && qm >= Math.max(C.q_min_km * 1000, total * C.q_min_share)) return dom;
+  const name = (act.name || "").toLowerCase();
+  for (const [cls, words] of C.name_keywords || []) if (words.some((w) => name.includes(w))) return cls;
+  return "E";
+}
+// </classify-rules>
+
 // <today-rules> 跟 transform.build_today 同一套判斷；門檻數字來自 DATA.today_rules，改規則要兩邊一起改
 function computeToday(rows, today, R, prevDayClasses) {
   const W = new Map(rows.map((r) => [r.id, r]));
@@ -710,16 +754,30 @@ async function initToday() {
     const rows = await wr.json(), raw = await ar.json();
     const prevDay = DATA.days.find((d) => d.date === addDays(todayIso, -1));
     const t = computeToday(rows, todayIso, DATA.today_rules, prevDay ? prevDay.activities.map((a) => a.cls) : []);
-    // 今天的訓練：網頁產生時已分類的用網頁的，剛跑完、網頁還沒有的用即時抓的基本資料
+    // 今天的訓練：網頁產生時已分類的用網頁的；剛跑完、網頁還沒有的，抓分段當場分類
     const runTypes = DATA.today_rules.run_types || [];
-    const acts = raw.map((r) => pageActs.find((a) => a.id === r.id) || {
-      id: r.id, date: todayIso, name: r.name || "", sport: r.type, is_run: runTypes.includes(r.type),
-      km: (r.distance || 0) / 1000, seconds: r.moving_time || 0,
-      pace_s: r.distance && r.moving_time ? r.moving_time / (r.distance / 1000) : null,
-      hr_avg: r.average_heartrate, hr_max: r.max_heartrate, load: r.icu_training_load,
-      description: (r.description || "").trim() || null, cls: runTypes.includes(r.type) ? "RUN" : "XT",
-      work_laps: [], flags: [],
-    });
+    const C = DATA.today_rules.classify;
+    const acts = await Promise.all(raw.map(async (r) => {
+      const known = pageActs.find((a) => a.id === r.id);
+      if (known) return known;
+      const isRun = runTypes.includes(r.type);
+      let laps = [], cls = isRun ? "RUN" : "XT";
+      if (isRun && C) {
+        try {
+          const ir = await icuFetch(`/activity/${encodeURIComponent(r.id)}/intervals`);
+          const body = ir.ok ? await ir.json() : null;
+          laps = workLaps(body ? (Array.isArray(body) ? body : body.icu_intervals) : [], C);
+        } catch (_) { /* 分段抓不到就只看時長 */ }
+        cls = classifyRun(r, laps, C);
+      }
+      return {
+        id: r.id, date: todayIso, name: r.name || "", sport: r.type, is_run: isRun,
+        km: (r.distance || 0) / 1000, seconds: r.moving_time || 0,
+        pace_s: r.distance && r.moving_time ? r.moving_time / (r.distance / 1000) : null,
+        hr_avg: r.average_heartrate, hr_max: r.max_heartrate, load: r.icu_training_load,
+        description: (r.description || "").trim() || null, cls, work_laps: laps, flags: [], live: isRun,
+      };
+    }));
     renderToday(t, `資料：即時（${md(todayIso)} ${twClock()} 從 Intervals.icu 抓，台灣時間）`, actBlocks(acts));
   } catch (e) {
     renderToday(DATA.today, `資料：網頁產生時（${built}）· 即時資料抓不到（${e.message}）`, fromPage ? actBlocks(pageActs) : []);
@@ -798,7 +856,8 @@ function renderSchedule() {
       const cls = ["sd", d === today || d === tomorrow ? "now" : "", race ? "race" : "",
                    p.cls === "OFF" ? "off" : "", p.cls ? "" : "none"].filter(Boolean).join(" ");
       details.append(el("div", { class: cls },
-        el("span", { class: "dt" }, `${md(d)} ${weekdayOf(d)}`, tag ? el("span", { class: "tag", text: tag }) : null),
+        el("span", { class: "tg" }, tag ? el("span", { class: "tag", text: tag }) : null),
+        el("span", { class: "dt", text: `${md(d)} ${weekdayOf(d)}` }),
         sessionBadge(p),
         el("span", { class: "km", text: p.km }),
         el("span", { class: "ds", text: p.desc })));
@@ -875,8 +934,36 @@ function chart(container, spec) {
   const tblBtn = el("button", { class: "tbl-btn", type: "button", "aria-pressed": "false", text: "表格" });
   card.append(el("div", { class: "head" }, el("div", { class: "title" }, spec.title, spec.unit ? el("small", { text: spec.unit }) : null), tblBtn));
   if (spec.series.length >= 2) {
-    card.append(el("div", { class: "legend" }, ...spec.series.map(s =>
-      el("span", {}, el("i", { class: s.kind === "dots" ? "key" : "key line", style: `background:${s.emphasis === false ? "var(--c0)" : s.color}` }), s.name))));
+    // 圖例可以帶說明（s.info）：滑鼠移上去、鍵盤 Tab 到、或手機點一下，就顯示
+    const tipId = `info-${Math.random().toString(36).slice(2, 9)}`;
+    const tip = el("div", { class: "info-tip", role: "tooltip", id: tipId, hidden: "" });
+    let pinned = null;
+    const showInfo = (item, info) => {
+      tip.replaceChildren(el("b", { text: info.title }),
+        ...info.lines.map((ln) => el("div", { class: ln.startsWith("＝") ? "f" : "", text: ln.replace(/^＝/, "") })),
+        info.foot ? el("div", { class: "foot", text: info.foot }) : null);
+      tip.hidden = false;
+      const left = Math.max(8, Math.min(item.offsetLeft, card.clientWidth - tip.offsetWidth - 8));
+      tip.style.left = `${left}px`;
+      tip.style.top = `${item.offsetTop + item.offsetHeight + 6}px`;
+    };
+    const hideInfo = () => { tip.hidden = true; pinned = null; };
+    card.append(el("div", { class: "legend" }, ...spec.series.map((s, i) => {
+      const key = el("i", { class: s.kind === "dots" ? "key" : "key line", style: `background:${s.emphasis === false ? "var(--c0)" : s.color}` });
+      if (!s.info) return el("span", {}, key, s.name);
+      const item = el("span", { class: "has-info", tabindex: "0", role: "button", "aria-describedby": tipId },
+        key, el("span", { class: "nm", text: s.name }), el("span", { class: "qi", "aria-hidden": "true", text: "ⓘ" }));
+      item.addEventListener("mouseenter", () => showInfo(item, s.info));
+      item.addEventListener("mouseleave", () => { if (pinned !== item) hideInfo(); });
+      item.addEventListener("focus", () => showInfo(item, s.info));
+      item.addEventListener("blur", hideInfo);
+      item.addEventListener("click", (e) => {          // 手機沒有 hover：點一下顯示、再點一下收起
+        e.stopPropagation();
+        if (pinned === item) hideInfo(); else { showInfo(item, s.info); pinned = item; }
+      });
+      return item;
+    })), tip);
+    INFO_HIDERS.push(() => { if (pinned) hideInfo(); });
   }
   const plot = el("div", { class: "plot", tabindex: 0, role: "img", "aria-label": spec.title });
   const dtWrap = el("div", { class: "datatable" });
@@ -1022,7 +1109,27 @@ function niceStep(range, ticks) {
   return 10 * mag;
 }
 
+// 圖例說明。數字都是 Intervals.icu 算的，這個網頁直接讀；公式已用實際資料驗算過
+const LOAD_FOOT = "訓練負荷：每筆訓練用心率算（HRSS），以乳酸閾值心率跑 1 小時 = 100。";
+const INFO_HIDERS = [];                       // 點圖例以外的地方，收起手機上點開的說明
+document.addEventListener("click", () => INFO_HIDERS.forEach((hide) => hide()));
+const LOAD_INFO = {
+  ctl: { title: "CTL 體能（長期訓練量）", foot: LOAD_FOOT, lines: [
+    "最近約 6 週訓練負荷的加權平均，越近的訓練權重越大。",
+    "＝今天 CTL = 昨天 CTL + (今天負荷 − 昨天 CTL) ÷ 42",
+    "越高代表累積的訓練量越多；休息一天只會掉一點點。"] },
+  atl: { title: "ATL 疲勞（短期累積）", foot: LOAD_FOOT, lines: [
+    "最近約 1 週訓練負荷的加權平均，反映短期累積的疲勞。",
+    "＝今天 ATL = 昨天 ATL + (今天負荷 − 昨天 ATL) ÷ 7",
+    "練得多很快上升，休息一兩天就明顯下降。"] },
+  tsb: { title: "TSB 狀態（體能 − 疲勞）", foot: LOAD_FOOT, lines: [
+    "＝TSB = CTL − ATL",
+    "負的：疲勞大於體能，正在累積訓練刺激。",
+    "正的：恢復得比較好；賽前減量會讓它回到正值。"] },
+};
+
 function renderCharts() {
+  INFO_HIDERS.length = 0;
   const box = document.getElementById("charts");
   box.replaceChildren();
   const wd = daysAsc.filter(d => d.wellness);
@@ -1030,9 +1137,9 @@ function renderCharts() {
 
   chart(box, { title: "體能 / 疲勞 / 狀態", unit: "CTL · ATL · TSB", zero: true,
     series: [
-      { name: "CTL 體能", color: "var(--c1)", kind: "line", points: pick("ctl") },
-      { name: "ATL 疲勞", color: "var(--c2)", kind: "line", points: pick("atl") },
-      { name: "TSB 狀態", color: "var(--c3)", kind: "line", points: pick("tsb") },
+      { name: "CTL 體能", color: "var(--c1)", kind: "line", points: pick("ctl"), info: LOAD_INFO.ctl },
+      { name: "ATL 疲勞", color: "var(--c2)", kind: "line", points: pick("atl"), info: LOAD_INFO.atl },
+      { name: "TSB 狀態", color: "var(--c3)", kind: "line", points: pick("tsb"), info: LOAD_INFO.tsb },
     ] });
 
   const bl = DATA.trends.hrv_baseline;
@@ -1182,7 +1289,9 @@ function noteBlock(a) {
 function activityBlock(a, opts = {}) {
   const badge = a.cls === "RUN"        // 剛跑完、網頁還沒分類的跑步
     ? el("span", { class: "badge" }, el("i", { style: "background:var(--c0)" }), "跑步", el("span", { class: "cls", text: "未分類" }))
-    : el("span", { class: "badge" }, el("i", { style: `background:${color(a.cls)}` }), label(a.cls), el("span", { class: "cls", text: a.is_run ? a.cls : a.sport }));
+    : el("span", { class: "badge", title: a.live ? "打開網頁時當場分類；⚠ 提醒要等網頁下次更新" : null },
+        el("i", { style: `background:${color(a.cls)}` }), label(a.cls),
+        el("span", { class: "cls", text: (a.is_run ? a.cls : a.sport) + (a.live ? " · 即時" : "") }));
   const stats = a.is_run
     ? el("span", { class: "stats" }, el("b", { text: `${n1(a.km)} km` }), ` · `, el("b", { text: `${pace(a.pace_s)}/km` }), ` · 均心 ${a.hr_avg ?? "--"} · 最高 ${a.hr_max ?? "--"} · 負荷 ${a.load ?? "--"}`)
     : el("span", { class: "stats" }, el("b", { text: a.name || a.sport }), ` · ${Math.round(a.seconds / 60)} 分 · 均心 ${a.hr_avg ?? "--"} · 最高 ${a.hr_max ?? "--"} · 負荷 ${a.load ?? "--"}`);

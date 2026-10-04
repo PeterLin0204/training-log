@@ -25,11 +25,13 @@ WORK_LAP_MIN_METERS = 150
 # 沒有課表對照時，多久以上的跑步視為長跑
 LONG_RUN_MIN_MINUTES = 70
 
-# 主課表段要佔多少，才算「質量課」而不是「輕鬆跑後面加幾趟加速」。
-# 長跑的門檻更高：95 分鐘長跑最後 2km 拉到 M/T，仍然是長跑，不是節奏課。
+# 70 分鐘以下的跑步，質量段（落在 M/T/I/R 配速的主課表段）至少 1km 且佔全程 15%，
+# 才算質量課；不然只是輕鬆跑後面加幾趟加速。
 QUALITY_MIN_KM = 1.0
 QUALITY_MIN_SHARE = 0.15
-QUALITY_MIN_SHARE_LONG = 0.30
+# 70 分鐘以上的跑步，質量段要過半才算質量課（例如熱身 + 2x5km M）；
+# 不然就是長跑——尾段拉到 M 甚至 T，仍然是長跑。
+LONG_QUALITY_SHARE = 0.5
 
 # 短於這個秒數的算加速跑，不當成間歇趟（檢查趟長時要排除）
 REP_MIN_SECONDS = 60
@@ -162,18 +164,29 @@ def _band_center(spec):
     return lo or hi
 
 
-def build_pace_bands(paces: dict):
-    """回傳 [(強度, 上界秒數)]，由快到慢；上界取相鄰兩帶中心點的中位。
+def _band_fast_end(spec):
+    """配速帶最快的那一端：E 5:45-6:20 → 5:45；只有 target 的就是 target。"""
+    if not spec:
+        return None
+    return parse_pace(spec.get("min")) or _band_center(spec)
 
-    例：R 227.5 / I 245 / T 267 / M 280 / E 362.5
-        → R<=236, I<=256, T<=273.5, M<=321, 其餘 E
+
+def build_pace_bands(paces: dict):
+    """回傳 [(強度, 上界秒數)]，由快到慢。
+
+    界線取「這一帶的中心」和「下一個較慢帶的最快端」的中點。
+    用最快端是為了 M 和 E 之間：E 是 5:45 起跳的一段範圍，用 E 的中點（6:02）
+    會把 5:00–5:20 的「偏快的輕鬆跑」也算成馬拉松配速。
+
+    例：R 3:42 / I 3:59 / T 4:20 / M 4:37 / E 5:45-6:20
+        → R≤3:50、I≤4:10、T≤4:28、M≤5:11，其餘 E
     """
     order = ["R", "I", "T", "M", "E"]
-    centers = [(k, _band_center(paces.get(k))) for k in order]
-    centers = [(k, c) for k, c in centers if c]
+    centers = [(k, _band_center(paces.get(k)), _band_fast_end(paces.get(k))) for k in order]
+    centers = [(k, c, f) for k, c, f in centers if c]
     bands = []
-    for (k1, c1), (_k2, c2) in zip(centers, centers[1:]):
-        bands.append((k1, (c1 + c2) / 2))
+    for (k1, c1, _f1), (_k2, _c2, f2) in zip(centers, centers[1:]):
+        bands.append((k1, (c1 + f2) / 2))
     if centers:
         bands.append((centers[-1][0], float("inf")))
     return bands
@@ -414,40 +427,57 @@ def classify_by_name(act: dict):
     return "", ""
 
 
+QUALITY_BANDS = ("R", "I", "T", "M")      # 由快到慢
+
+
 def infer_class(act: dict, laps, bands):
     """預設的分類方式：用實際跑出來的東西回推強度，不看課表。
 
-    規則：取「累積工作距離最多的分帶」當課別。不是取最快的分帶——一趟收尾加速
-    不該把整堂節奏跑升級成間歇課。時長夠長而主帶是 E/M 的，歸為長跑。
+    1. 主課表段依配速歸到 R/I/T/M；比 M 帶慢的（例如 5:30）只是偏快的輕鬆跑，不算質量
+    2. 70 分鐘以上：質量段過半才算質量課，否則是長跑——尾段拉到 M、T 仍然是長跑
+    3. 70 分鐘以下：質量段至少 1km 且佔全程 15% 才算質量課；E 尾巴加幾趟加速仍是 E
+    4. 是質量課就取距離最多的配速帶（一樣多取快的）。不取最快的帶——
+       一趟收尾加速不該把整堂節奏跑升級成間歇課
+
+    網頁的 classifyRun()（web/template.html）是同一套規則，改這裡要一起改。
 
     為什麼不信課表：課表是計畫，實際常常不一樣——課挪到別天、多練一天、
     少練一天。標籤要回答「我做了什麼」，課表跟實際的差距交給 compare_day
     另外列出來。要退回 SPEC 原本的「課表優先」規則，用 --strict-class。
     """
     seconds = act.get("moving_time") or 0
+    total_m = act.get("distance") or 0
     is_long = seconds >= LONG_RUN_MIN_MINUTES * 60
 
-    total_m = act.get("distance") or 0
-    work_m = sum(l.meters for l in laps)
-    # 主課表段太少就不算質量課：E 30 分尾巴加 4x150m，主課仍然是 E
-    share = QUALITY_MIN_SHARE_LONG if is_long else QUALITY_MIN_SHARE
-    is_quality = work_m >= max(QUALITY_MIN_KM * 1000, total_m * share)
-
-    if laps and is_quality:
-        by_band = {}
-        for lap in laps:
-            band = band_for_pace(lap.pace_s, bands)
-            if band:
-                by_band[band] = by_band.get(band, 0.0) + lap.meters
-        if by_band:
-            dominant = max(by_band, key=lambda b: by_band[b])
-            if is_long and dominant in ("E", "M"):
-                return "L", "duration"
-            return dominant, "pace"
+    quality = {}
+    for lap in laps:
+        band = band_for_pace(lap.pace_s, bands)
+        if band in QUALITY_BANDS:
+            quality[band] = quality.get(band, 0.0) + lap.meters
+    quality_m = sum(quality.values())
+    dominant = (max(quality, key=lambda b: (quality[b], -QUALITY_BANDS.index(b)))
+                if quality else None)
 
     if is_long:
+        if dominant and quality_m >= LONG_QUALITY_SHARE * total_m:
+            return dominant, "pace"
         return "L", "duration"
+    if dominant and quality_m >= max(QUALITY_MIN_KM * 1000, total_m * QUALITY_MIN_SHARE):
+        return dominant, "pace"
     return "E", "default"
+
+
+def classify_rules():
+    """給網頁用同一套規則即時分類今天剛跑完的訓練（網頁還沒重新產生之前）。"""
+    return {
+        "min_lap_m": WORK_LAP_MIN_METERS,
+        "long_min": LONG_RUN_MIN_MINUTES,
+        "long_share": LONG_QUALITY_SHARE,
+        "q_min_km": QUALITY_MIN_KM,
+        "q_min_share": QUALITY_MIN_SHARE,
+        "quality_bands": list(QUALITY_BANDS),
+        "name_keywords": [[cls, list(words)] for cls, words in NAME_KEYWORDS],
+    }
 
 
 # ---------- execution_flags ----------
@@ -1173,6 +1203,12 @@ def build_today_rules(plan, today):
             "illness": _hrv_action(plan, "喉嚨痛"),
         },
         "races": _races(plan),
+        "classify": {
+            **classify_rules(),
+            "bands": [[name, None if upper == float("inf") else upper]
+                      for name, upper in build_pace_bands(plan.get("paces") or {})],
+            "e_limit": parse_pace(((plan.get("paces") or {}).get("E") or {}).get("min")),
+        },
         "sessions": {d: v for d, v in sessions.items() if lo <= d <= hi},
     }
 
