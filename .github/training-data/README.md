@@ -1,7 +1,7 @@
 # training-data
 
 訓練日誌的純文字資料。由公開 repo [training-log](https://github.com/PeterLin0204/training-log)
-的 GitHub Actions 自動更新：每天台灣時間 06:17、09:17、21:17，以及 training-log 有 push 時。
+的 GitHub Actions 自動更新：排在每天台灣時間 06:17、07:17、09:17、21:17（GitHub 實際常延遲 2–5 小時），以及 training-log 有 push 時。實際時間看 `updated.txt`。
 
 這個 repo 是**私人**的，給 Claude 讀取用。不要手動修改，下一次更新會整個覆蓋。
 

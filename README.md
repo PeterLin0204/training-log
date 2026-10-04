@@ -40,7 +40,8 @@ python digest.py --format json --out docs/data.json    # 純資料
 | `render_html.py` | 摘要資料結構 → 單一 HTML 檔（資料內嵌） |
 | `web/template.html` | 網頁的版面、樣式、互動，全部在這一個檔 |
 | `docs/index.html` | 本機產生的網頁（不進 repo） |
-| `.github/workflows/update.yml` | 每天早上產生加密網頁、部署到 GitHub Pages |
+| `.github/workflows/update.yml` | 產生加密網頁部署到 GitHub Pages，並把文字摘要推到私人 repo `training-data` |
+| `.github/training-data/README.md` | `training-data` 的說明檔（給 Claude 看的閱讀指引） |
 | `plan.json` | 週期設定：賽事、配速、rules、weeks、sessions |
 | `sample/` | 實際 API 回傳的原始 JSON，寫解析時的對照組（不進 repo） |
 
