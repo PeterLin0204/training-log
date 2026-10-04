@@ -2,7 +2,7 @@
 
 更新：2026-10-05
 
-**一句話：上線了。網址 https://peterlin0204.github.io/training-log/ ，「今日狀態」打開網頁時即時抓；Claude 雲端排程每天 12:30 讀資料給回饋，週日做週檢討。**
+**一句話：上線了。網址 https://peterlin0204.github.io/training-log/ ，「今日狀態」打開網頁時即時抓；教練回饋改由你在 claude.ai 聊天設定的排程讀 training-data。**
 
 ---
 
@@ -14,7 +14,7 @@
 | 網頁 | https://peterlin0204.github.io/training-log/ （加密，要密碼） |
 | 自動更新 | 「今日狀態」打開網頁時即時抓；其他內容排在台灣時間 06:17、07:17、09:17、21:17（GitHub 實際常延遲 2–5 小時），push 也會立即重新發佈 |
 | 給 Claude 的資料 | 私人 repo https://github.com/PeterLin0204/training-data （8 週文字摘要、JSON、plan.json），每次更新網頁時一起更新 |
-| Claude 雲端排程 | 「跑步教練｜訓練簡報」週一到週六 12:30、「跑步教練｜週檢討」週日 12:30，結果在 https://claude.ai/code/routines |
+| Claude 排程 | 在 claude.ai 聊天自行設定（週一到週六 12:30 訓練簡報、週日 12:30 週檢討）；Claude Code 的雲端排程已停用 |
 | Secrets | `ICU_ATHLETE_ID`、`ICU_API_KEY`、`DIGEST_PASSWORD`、`TRAINING_DATA_DEPLOY_KEY`（只能寫 training-data 的部署金鑰） |
 | 已驗證 | 線上 HTML 只有加密資料，搜尋地名、賽事名、帳號、API key 都是 0 筆 |
 
@@ -235,23 +235,15 @@ Intervals.icu 抓那筆訓練的分段來分類，標「即時」；⚠ 提醒�
 我用你的資料驗算過，跟 Intervals.icu 算出來的一模一樣。
 網頁趨勢圖的 CTL / ATL / TSB 圖例，滑鼠移上去（手機點一下）也會顯示這些說明。
 
-### Claude 雲端排程（跑步教練）
+### Claude 排程（跑步教練）
 
 網頁是加密的，Claude 讀不到；所以 GitHub Actions 每次更新網頁時，會把**純文字摘要**一起推到
-私人 repo `training-data`，Claude 從那裡讀。
+私人 repo `training-data`，Claude 從那裡讀（Claude 的 GitHub App 已授權存取）。
 
-| 排程 | 時間（台灣） | 內容 |
-|---|---|---|
-| 跑步教練｜訓練簡報 | 週一到週六 12:30 | 今日狀態、最近一次訓練回饋、明日課表、想問你的問題 |
-| 跑步教練｜週檢討 | 週日 12:30 | 本週執行、質量課表現、恢復與負荷、下週課表與重點、建議 |
+排程改成**在 claude.ai 聊天自己設定**：週一到週六 12:30 訓練簡報、週日 12:30 週檢討。
+排在中午是因為 GitHub 的更新常延遲 2–5 小時，早上的更新實際多在 08:30–09:40 才跑完。
 
-- 結果在 https://claude.ai/code/routines 點進排程看執行紀錄，手機 Claude App 也看得到
-- 只讀資料、不改任何檔案；數字只取自資料，沒有的會寫「資料沒有」
-- 為什麼是 12:30：GitHub 的排程常延遲 2–5 小時，早上的更新實際多在 08:30–09:40 跑完；
-  排在中午才確定讀得到你當天早上的訓練。資料太舊時，簡報第一行會寫「⚠ 資料更新於幾點」
-- 改時間、改內容、暫停：到上面的網址直接改，或跟 Claude Code 說
-- 在 claude.ai 聊天時，也可以直接請 Claude「看 training-data 這週的資料」
-  （Claude 的 GitHub App 已授權存取 training-data）
+Claude Code 這邊建過的兩個雲端排程已停用（要刪除到 https://claude.ai/code/routines）。
 
 ### 手動更新網頁（不想等到下次排程）
 
@@ -289,7 +281,7 @@ gh workflow run update.yml
 | 項目 | 改成 |
 |---|---|
 | Claude 排程讀不到加密網頁 | 新增私人 repo `training-data`：GitHub Actions 每次更新時推 8 週文字摘要、JSON、plan.json 進去；用只能寫這個 repo 的部署金鑰 |
-| 跑步教練排程 | 改成兩個雲端排程：週一到週六 12:30 訓練簡報、週日 12:30 週檢討，讀 training-data |
+| 跑步教練排程 | 先在 Claude Code 建雲端排程測試成功，之後改由使用者在 claude.ai 聊天設定；Code 排程已停用 |
 | 舊的「跑步教練」 | 停用，並清掉寫在指令裡的網頁密碼 |
 | GitHub 排程 | 多加 07:17；實測延遲 2–5 小時，早上排兩次 |
 
