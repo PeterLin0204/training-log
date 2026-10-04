@@ -3,9 +3,11 @@
 # 網頁不 commit 進 repo（docs/ 在 .gitignore 裡），只存在 Pages 上，而且是加密的——
 # 公開 repo 裡看不到任何訓練或健康資料。
 #
-# 需要三個 repo secrets（Settings → Secrets and variables → Actions）：
-#   ICU_ATHLETE_ID、ICU_API_KEY、DIGEST_PASSWORD（網頁密碼）
-# 最快的設法：在這個資料夾打 `gh secret set -f .env`
+# 同時把純文字摘要推到私人 repo training-data，讓 Claude 能直接讀（網頁是加密的，Claude 讀不到）。
+#
+# 需要的 repo secrets（Settings → Secrets and variables → Actions）：
+#   ICU_ATHLETE_ID、ICU_API_KEY、DIGEST_PASSWORD（網頁密碼）——在這個資料夾打 `gh secret set -f .env`
+#   TRAINING_DATA_DEPLOY_KEY——推送 training-data 用的部署金鑰，只能寫那一個 repo
 
 name: update digest
 
@@ -70,6 +72,45 @@ jobs:
             git commit --allow-empty -m "keepalive: 維持每日排程"
             git push
           fi
+
+  # 文字摘要 → 私人 repo training-data。跟網頁分開跑：這一步失敗不影響網頁部署。
+  data:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install requests
+
+      - name: 產生文字摘要並推到 training-data
+        env:
+          ICU_ATHLETE_ID: ${{ secrets.ICU_ATHLETE_ID }}
+          ICU_API_KEY: ${{ secrets.ICU_API_KEY }}
+          DEPLOY_KEY: ${{ secrets.TRAINING_DATA_DEPLOY_KEY }}
+        run: |
+          if [ -z "$DEPLOY_KEY" ]; then echo "沒有設定 TRAINING_DATA_DEPLOY_KEY，略過"; exit 0; fi
+          out="$RUNNER_TEMP/out"
+          mkdir -p "$out"
+          python digest.py --weeks 8 --out "$out/digest.txt"
+          python digest.py --weeks 8 --format json --out "$out/digest.json"   # json 不含 API key
+          cp plan.json .github/training-data/README.md "$out/"
+          TZ=Asia/Taipei date '+%Y-%m-%d %H:%M（台灣時間）' > "$out/updated.txt"
+
+          install -m 600 /dev/null "$RUNNER_TEMP/deploy_key"
+          printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/deploy_key"
+          export GIT_SSH_COMMAND="ssh -i $RUNNER_TEMP/deploy_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+          git clone -q --depth 1 git@github.com:PeterLin0204/training-data.git "$RUNNER_TEMP/repo"
+          cp "$out"/* "$RUNNER_TEMP/repo/"
+          cd "$RUNNER_TEMP/repo"
+          git add -A
+          if git diff --cached --quiet; then echo "沒有變動"; exit 0; fi
+          git -c user.name="digest-bot" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -q -m "摘要 $(TZ=Asia/Taipei date '+%F %H:%M')"
+          git push -q
+          echo "已更新 training-data"
 
   deploy:
     needs: build
